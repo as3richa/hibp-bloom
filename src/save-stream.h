@@ -43,6 +43,7 @@
   const status st = compute_buffer_size(&buffer_size, bf->n_hash_functions, bf->log2_bits);
 
   assert(st == HIBP_OK);
+  (void)st;
 
   byte checksum[SHA1_BYTES];
   sha1(checksum, buffer_size, bf->buffer);

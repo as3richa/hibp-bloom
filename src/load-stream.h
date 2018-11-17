@@ -82,4 +82,13 @@
     return HIBP_E_IO;
   }
 
+  /* Assert that the checksum actually matches */
+  byte true_checksum[SHA1_BYTES];
+  sha1(true_checksum, buffer_size, bf->buffer);
+
+  if(memcmp(checksum, true_checksum, SHA1_BYTES) != 0) {
+    free(bf->buffer);
+    return HIBP_E_CHECKSUM;
+  }
+
   return HIBP_OK;

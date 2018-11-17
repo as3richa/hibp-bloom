@@ -10,6 +10,8 @@
 
 typedef unsigned char hibp_byte_t;
 
+#define HIBP_SHA1_BYTES 20
+
 /* ================================================================
  * hibp_bloom_filter_t
  * ================================================================ */
@@ -128,6 +130,7 @@ hibp_status_t hibp_sha1_hex2bin(hibp_byte_t* bin, const char* hex);
  * - HIBP_E_INVAL if either n_hash_functions or log2_bits is zero
  * - HIBP_E_2BIG if n_hash_functions or log2_bits exceeds the limits of the implementation
  * - HIBP_E_NOMEM if memory allocation fails
+ * - HIBP_E_CHECKSUM if the file was read in its entirety but its checksum doesn't match
  * - HIBP_OK otherwise
  * In all cases except the last, no call to hibp_bf_destroy is necessary */
 hibp_status_t hibp_bf_new(hibp_bloom_filter_t* bf, size_t n_hash_functions, size_t log2_bits);

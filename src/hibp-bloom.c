@@ -11,21 +11,24 @@
  * Types and constants
  * ================================================================ */
 
-/* So the compile can populate some constants at compile time
- * (and hopefully elide them) */
-#define MIN(x, y) (((x) <= (y)) ? (x) : (y))
-
 /* Just for brevity */
 typedef hibp_byte_t         byte;
 typedef hibp_bloom_filter_t bloom_filter;
 typedef hibp_status_t       status;
+typedef hibp_prng_t         prng_t;
+typedef hibp_getc_t         getc_t;
+typedef hibp_putc_t         putc_t;
+
+/* So the compile can populate some constants at compile time
+ * (and hopefully elide them) */
+#define MIN(x, y) (((x) <= (y)) ? (x) : (y))
 
 /* SIZE_MAX isn't present on all platforms */
 #undef SIZE_MAX
 static const size_t SIZE_MAX = ~(size_t)0;
 
-static const size_t SHA1_BITS = 160;
-static const size_t SHA1_BYTES = SHA1_BITS / 8;
+static const size_t SHA1_BYTES = HIBP_SHA1_BYTES;
+static const size_t SHA1_BITS = 8 * HIBP_SHA1_BYTES;
 
 /* Our implementations depends on being able to address 2**log2_bits bits, hence
  * necessarily log2_bits can't exceed the number of bits in a size_t. Moreover, it's
@@ -51,7 +54,7 @@ static const byte VERSION[] = { 0xb1, 0x00, 0x13, 0x37 };
 
 /* Each of the first bf->n_hash_functions slices of size bf->log2_bits of
  * bf->buffer encodes a Bloom filter hash function */
-static inline byte* kth_hash_function(const bloom_filter* bf, size_t k) {
+static inline byte* nth_hash_function(const bloom_filter* bf, size_t k) {
   return bf->buffer + k * bf->log2_bits;
 }
 
@@ -61,8 +64,8 @@ static inline byte* bvector(const bloom_filter* bf) {
 }
 
 /* Evaluate the k'th hash function of bf against the given sha */
-static inline size_t eval_kth_hash_function(const bloom_filter* bf, size_t k, const byte* sha) {
-  const byte* indices = kth_hash_function(bf, k);
+static inline size_t eval_nth_hash_function(const bloom_filter* bf, size_t k, const byte* sha) {
+  const byte* indices = nth_hash_function(bf, k);
 
   /* For our purposes, a hash function takes some sha and concatenates together some
    * permutation of some subset of the bits of sha. In particular each hash function
@@ -73,7 +76,7 @@ static inline size_t eval_kth_hash_function(const bloom_filter* bf, size_t k, co
 
   for(size_t i = 0; i < bf->log2_bits; i++) {
     const byte index = indices[i];
-    assert(0 <= index && index < SHA1_BITS);
+    assert(index < SHA1_BITS);
 
     /* Take the index'th bit of sha */
     const size_t bit = ((sha[index / 8] >> (index % 8)) & 1);
@@ -81,6 +84,8 @@ static inline size_t eval_kth_hash_function(const bloom_filter* bf, size_t k, co
     /* Concatenate it onto the value */
     value |= (bit << i);
   }
+
+  assert(value < (((size_t)1) << bf->log2_bits));
 
   return value;
 }
@@ -90,7 +95,7 @@ static inline size_t eval_kth_hash_function(const bloom_filter* bf, size_t k, co
  * total size to allocate for the Bloom filter's buffer, if indeed the parameters were
  * valid */
 static inline status compute_buffer_size(size_t* buffer_size, size_t n_hash_functions, size_t log2_bits) {
-  if(log2_bits == 0 || n_hash_functions == 0) {
+  if(n_hash_functions == 0) {
     return HIBP_E_INVAL;
   }
 
@@ -122,7 +127,7 @@ static inline status compute_buffer_size(size_t* buffer_size, size_t n_hash_func
 }
 
 /* Plumbing for hibp_bf_load_stream */
-static inline int my_read(byte* buffer, size_t size, void* ctx, int (*getc)(void*)) {
+static inline int my_read(byte* buffer, size_t size, void* ctx, getc_t getc) {
   for(size_t i = 0; i < size; i ++) {
     int c = getc(ctx);
 
@@ -137,7 +142,7 @@ static inline int my_read(byte* buffer, size_t size, void* ctx, int (*getc)(void
 }
 
 /* Plumbing for hibp_bf_save_stream */
-static inline int my_write(const byte* buffer, size_t size, void* ctx, int (*putc)(int, void*)) {
+static inline int my_write(const byte* buffer, size_t size, void* ctx, putc_t putc) {
   for(size_t i = 0; i < size; i ++) {
     if(putc(buffer[i], ctx) == EOF) {
       return -1;
@@ -186,25 +191,27 @@ static inline void sha1(byte* sha, size_t size, const byte* buffer) {
    * fail, but i) having audited the source, it cannot do so in practice in the current
    * implementation; ii) it's hard to imagine a world where it could */
   const int okay = (SHA1(buffer, size, sha) != NULL);
+  (void)okay;
   assert(okay);
 }
 
 /* Returns a pseudo-random number (nominally) uniformly distributed on [0, SIZE_MAX].
- * If *openssl, try OpenSSL's RAND_pseudo_bytes first (setting *openssl = 0 if it fails).
- * Use stdlib's rand if the initial call to RAND_pseudo_bytes fails, or if *openssl was
- * zero in the first place */
-static inline int my_rand(int* openssl) {
+ * If *use_openssl, try OpenSSL's RAND_pseudo_bytes first (setting *use_openssl = 0
+ * if it fails). Use stdlib's rand if the initial call to RAND_pseudo_bytes fails, or
+ * if *use_openssl was zero in the first place */
+static inline size_t my_rand(int* use_openssl) {
   size_t number;
 
-  if(*openssl) {
-    *openssl = (RAND_pseudo_bytes((byte*)&number, sizeof(size_t)) != -1);
+  if(*use_openssl) {
+    number = 0; /* Prevent a spurious valgrind error */
+    *use_openssl = (RAND_pseudo_bytes((byte*)&number, sizeof(size_t)) != -1);
   }
 
-  if(!*openssl) {
+  if(!*use_openssl) {
     number = 0;
 
-    /* This deliberately clobbers previously-written bits. I don't know if or how
-     * this is useful */
+    /* This deliberately clobbers previously-written bits. I don't know if that's
+     * actually useful, but YOLO */
     for(size_t i = 0; i < sizeof(size_t); i ++) {
       number = ((number << 8) | (size_t)rand());
     }
@@ -218,13 +225,16 @@ static size_t default_prng(void* ctx, size_t upper_bound) {
   (void)ctx;
   assert(upper_bound > 0);
 
-  int openssl = 1;
+  /* Flag indicating whether to attempt to use the OpenSSL PRNG. If and when the OpenSSL
+   * PRNG fails, my_rand will set the flag to zero and all subsequent RNG will be done
+   * with sdtlib's rand */
+  int use_openssl = 1;
 
   if(upper_bound == SIZE_MAX) {
-    return my_rand(&openssl);
+    return my_rand(&use_openssl);
   }
 
-  /* Because SIZE_MAX isn't necessarily divisible by upper_bound, my_rand(openssl) %
+  /* Because SIZE_MAX isn't necessarily divisible by upper_bound, my_rand(use_openssl) %
    * upper_bound isn't necessarily uniformly distributed (there's potentially a slight
    * bias to lower numbers). We can rectify this by discarding the highest numbers from
    * the range of my_rand */
@@ -232,10 +242,11 @@ static size_t default_prng(void* ctx, size_t upper_bound) {
   /* This is just a rounding down to the nearest multiple of upper_bound */
   const size_t limit = SIZE_MAX / upper_bound * upper_bound;
 
-  /* Find some random number uniformly distributed on [0, limit) */
   size_t number;
+
+  /* Find some random number uniformly distributed on [0, limit) */
   do {
-    number = my_rand(&openssl);
+    number = my_rand(&use_openssl);
   } while(number >= limit);
 
   /* Since [0, limit) has cardinality that is a multiple of upper_bound, and since number
@@ -345,7 +356,7 @@ status hibp_bf_new(bloom_filter* bf, size_t n_hash_functions, size_t log2_bits) 
   return hibp_bf_new_prng(bf, n_hash_functions, log2_bits, NULL, default_prng);
 }
 
-status hibp_bf_new_prng(bloom_filter* bf, size_t n_hash_functions, size_t log2_bits, void* ctx, size_t (*prng)(void*, size_t)) {
+status hibp_bf_new_prng(bloom_filter* bf, size_t n_hash_functions, size_t log2_bits, void* ctx, prng_t prng) {
   size_t buffer_size;
   const status st = compute_buffer_size(&buffer_size, n_hash_functions, log2_bits);
 
@@ -363,7 +374,7 @@ status hibp_bf_new_prng(bloom_filter* bf, size_t n_hash_functions, size_t log2_b
     return HIBP_E_NOMEM;
   }
 
-  byte* hash_functions = kth_hash_function(bf, 0);
+  byte* hash_functions = nth_hash_function(bf, 0);
   const size_t hash_functions_size = bf->log2_bits * bf->n_hash_functions;
 
   /* Intuitively, if we have a small number of hash functions, we probably don't want
@@ -431,7 +442,7 @@ status hibp_bf_load_file(bloom_filter* bf, FILE* file) {
 
 }
 
-status hibp_bf_load_stream(bloom_filter* bf, void* ctx, int (*getc)(void*)) {
+status hibp_bf_load_stream(bloom_filter* bf, void* ctx, getc_t getc) {
   #include "load-stream.h"
 }
 
@@ -451,7 +462,7 @@ status hibp_bf_save_file(const bloom_filter* bf, FILE* file) {
 
 }
 
-status hibp_bf_save_stream(const bloom_filter* bf, void* ctx, int (*putc)(int, void*)) {
+status hibp_bf_save_stream(const bloom_filter* bf, void* ctx, putc_t putc) {
   #include "save-stream.h"
 }
 
@@ -473,7 +484,7 @@ void hibp_bf_insert_sha1(bloom_filter* bf, const byte* sha) {
   byte* vector = bvector(bf);
 
   for(size_t i = 0; i < bf->n_hash_functions; i++) {
-    const size_t k = eval_kth_hash_function(bf, i, sha);
+    const size_t k = eval_nth_hash_function(bf, i, sha);
     vector[k / 8] |= (1 << (k % 8));
   }
 }
@@ -487,7 +498,7 @@ int hibp_bf_query(const bloom_filter* bf, size_t size, const byte* buffer) {
 }
 
 int hibp_bf_query_str(const bloom_filter* bf, const char* str) {
-  return hibp_bf_query(bf, strlen(str), (byte*)str);
+  return hibp_bf_query(bf, strlen(str), (const byte*)str);
 }
 
 int hibp_bf_query_sha1(const bloom_filter* bf, const byte* sha) {
@@ -498,7 +509,9 @@ int hibp_bf_query_sha1(const bloom_filter* bf, const byte* sha) {
   const byte* vector = bvector(bf);
 
   for(size_t i = 0; i < bf->n_hash_functions; i++) {
-    const size_t k = eval_kth_hash_function(bf, i, sha);
+    const size_t k = eval_nth_hash_function(bf, i, sha);
+
+    assert(k < (((size_t)1) << bf->log2_bits));
 
     if(((vector[k / 8] >> (k % 8)) & 1) == 0) {
       return 0;
