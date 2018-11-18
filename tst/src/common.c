@@ -1,3 +1,4 @@
+#include <openssl/sha.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -40,7 +41,7 @@ const char* status2str(hibp_status_t status) {
 
 char* buffer2str(size_t size, hibp_byte_t* buffer) {
   char* str = (char*)malloc(size + 1);
-  hassert(str != NULL, "malloc failed");
+  hassert0(str != NULL);
 
   memcpy(str, buffer, size + 1);
   return str;
@@ -48,7 +49,7 @@ char* buffer2str(size_t size, hibp_byte_t* buffer) {
 
 byte* random_ascii_buffer(size_t size) {
   byte* buffer = (byte*)malloc(size);
-  hassert(buffer != NULL, "malloc failed");
+  hassert0(buffer != NULL);
 
   for(size_t i = 0; i < size; i ++) {
     buffer[i] = (byte)((rand() % 95) + 32);
@@ -59,7 +60,7 @@ byte* random_ascii_buffer(size_t size) {
 
 char* random_ascii_str(size_t length) {
   char* str = (char*)malloc(length + 1);
-  hassert(str != NULL, "malloc failed");
+  hassert0(str != NULL);
 
   for(size_t i = 0; i < length; i ++) {
     str[i] = (byte)((rand() % 95) + 32);
@@ -71,12 +72,16 @@ char* random_ascii_str(size_t length) {
 }
 
 byte* random_sha1(void) {
-  byte* sha = (byte*)malloc(HIBP_SHA1_BYTES);
-  hassert(sha != NULL, "malloc failed");
+  byte* sha = (byte*)malloc(SHA1_BYTES);
+  hassert0(sha != NULL);
 
-  for(size_t i = 0; i < HIBP_SHA1_BYTES; i ++) {
+  for(size_t i = 0; i < SHA1_BYTES; i ++) {
     sha[i] = rand() % 256;
   }
 
   return sha;
+}
+
+void sha1(byte* sha, size_t size, const byte* buffer) {
+  hassert0(SHA1(buffer, size, sha) != NULL);
 }
