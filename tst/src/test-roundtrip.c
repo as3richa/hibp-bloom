@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "common.h"
+#include "util.h"
 
 /* Assert that Bloom filters survive the round trip of being written to and read
  * from disk. The important property is that, for any given Bloom filter, for any

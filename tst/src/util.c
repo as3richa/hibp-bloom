@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "common.h"
+#include "util.h"
 
 void my_hassert(int ok, const char* filename, int line, const char* cond, const char* format, ...) {
   if(ok) {

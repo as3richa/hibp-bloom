@@ -1,0 +1,23 @@
+## WIP
+
+create <n_hash_functions> <log2_bits>
+create-maxmem <count> <max_memory>
+create-falsepos <count> <rate>
+
+load <filename>
+save <filename>
+
+query-output-mode <'boolean' | 'number' | 'bin'
+
+insert <string> ...
+insert-sha <sha> ...
+
+query <string> ...
+query-sha <sha> ...
+
+insert-file [<'strings' | 'lines' | 'shas' | 'binary-shas' | 'raw'>] <filename>
+query-file [<'strings' | 'lines' | 'shas' | 'binary-shas' | 'raw'>] <filename>
+
+sha <string> ...
+
+falsepos [<trials>]

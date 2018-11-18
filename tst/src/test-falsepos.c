@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include "common.h"
+#include "util.h"
 
 /* Assert that, for sane parameters, the false positive rate matches our expectations */
 
@@ -21,8 +21,8 @@ const case_t cases[] = {
   { 5, 15,  10000 },
   { 5, 20,  20000 },
   { 10, 20, 20000 },
-  { 10, 24, 40000 },
-  { 15, 24, 40000 }
+  { 10, 24, 20000 },
+  { 15, 24, 20000 }
 };
 
 const size_t n_cases = sizeof(cases) / sizeof(case_t);
@@ -34,7 +34,7 @@ int main(void) {
     const size_t n_elements = cases[c].n_elements;
     const size_t n_trials = 5 * n_elements;
 
-    for(int k = 0; k < 10; k ++) {
+    for(int k = 0; k < 3; k ++) {
       hibp_bloom_filter_t bf;
       hibp_status_t status;
 

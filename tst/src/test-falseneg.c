@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "common.h"
+#include "util.h"
 
 /* Assert that no string that has been inserted into the set is ever misidentified
  * as being absent from the set */

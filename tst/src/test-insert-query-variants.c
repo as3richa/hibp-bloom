@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "common.h"
+#include "util.h"
 
 /* Assert that the 3 variants of insert and query are semantically equivalent
  * and interoperable */

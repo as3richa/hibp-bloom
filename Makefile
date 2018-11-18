@@ -1,6 +1,10 @@
 CFLAGS = -Iinclude -Wall -Wextra -Wpedantic -std=c99
 LFLAGS = -lm -lcrypto
 
+# ========================================
+# Build config
+# ========================================
+
 ifeq ($(BUILD), debug)
 CFLAGS += -O0 -g
 else ifeq ($(BUILD), debug-valgrind)
@@ -15,52 +19,83 @@ else
 $(error Bad BUILD: $(BUILD))
 endif
 
-SOURCES = src/hibp-bloom.c
-OBJECTS = $(addprefix obj/,$(notdir $(SOURCES:.c=.o)))
-LIBRARY = bin/hibp-bloom.a
+# No implicit rules, please
+.SUFFIXES:
 
-.PHONY: all lib clean test test-valgrind clean-test
+BINARY_SOURCES = $(shell echo src/bin/*.c)
+BINARY_OBJECTS = $(addprefix obj/bin/, $(notdir $(BINARY_SOURCES:.c=.o)))
+BINARIES=$(addprefix bin/, $(notdir $(BINARY_SOURCES:.c=)))
 
-all: lib
+LIBRARY_SOURCES = $(shell echo src/*.c)
+LIBRARY_OBJECTS = $(addprefix obj/, $(notdir $(LIBRARY_SOURCES:.c=.o)))
+LIBRARY=lib/hibp-bloom.a
+
+TEST_SOURCES=$(shell echo tst/src/test-*.c)
+TEST_OBJECTS=$(addprefix tst/obj/, $(notdir $(TEST_SOURCES:.c=.o)))
+TEST_BINARIES=$(addprefix tst/bin/, $(notdir $(TEST_SOURCES:.c=)))
+
+TEST_UTIL_SOURCE=tst/src/util.c
+TEST_UTIL_OBJECT=$(addprefix tst/obj/, $(notdir $(TEST_UTIL_SOURCE:.c=.o)))
+
+VG_SUPPRESSIONS_SOURCE=src/misc/suppressions.c
+VG_SUPPRESSIONS_LIST=valgrind-suppressions.txt
+
+ALL_OBJECTS = $(BINARY_OBJECTS) $(LIBRARY_OBJECTS)  $(TEST_OBJECTS)  $(TEST_UTIL_OBJECT) 
+ALL_BUILT_FILES = $(ALL_OBJECTS) $(BINARIES) $(LIBRARY) $(TEST_BINARIES) $(VG_SUPPRESSIONS_LIST)
+
+.PHONY: all bin lib test test-valgrind
+
+# Prevent make from nuking our object files between builds
+.SECONDARY:
+
+all: bin lib
+
+# ========================================
+# Binaries
+# ========================================
+
+bin: $(BINARIES)
+
+bin/%: obj/bin/%.o $(LIBRARY)
+	$(CC) $(CFLAGS) $(LFLAGS) -o $@ $^
+
+obj/bin/%.o: src/bin/%.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# ========================================
+# Static library
+# ========================================
 
 lib: $(LIBRARY)
 
-$(LIBRARY): $(OBJECTS)
+$(LIBRARY): $(LIBRARY_OBJECTS)
 	ar rcs $@ $?
 
 obj/%.o: src/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-clean: clean-test
-	rm -f $(OBJECTS) $(TEST_BINARIES) $(LIBRARY)
-
 # ========================================
 # Tests
 # ========================================
 
-TEST_SOURCES=$(shell echo tst/src/test-*.c)
-TEST_BINARIES=$(addprefix tst/bin/,$(notdir $(TEST_SOURCES:.c=)))
-
-COMMON_SOURCE=tst/src/common.c
-COMMON_OBJECT=tst/obj/common.o
-
-SUPPRESSIONS=valgrind-suppressions.txt
-SUPPRESSIONS_SOURCE=src/suppressions.c
-
 test: $(TEST_BINARIES)
 	script/run-tests.sh $(TEST_BINARIES)
 
-test-valgrind: $(TEST_BINARIES) $(SUPPRESSIONS)
-	VALGRIND=1 SUPPRESSIONS=$(SUPPRESSIONS) script/run-tests.sh $(TEST_BINARIES)
+test-valgrind: $(TEST_BINARIES) $(VG_SUPPRESSIONS_LIST)
+	VALGRIND=1 SUPPRESSIONS=$(VG_SUPPRESSIONS_LIST) script/run-tests.sh $(TEST_BINARIES)
 
-tst/bin/test-%: tst/src/test-%.c $(LIBRARY) $(COMMON_OBJECT)
+tst/bin/%: tst/obj/%.o $(LIBRARY) $(TEST_UTIL_OBJECT)
 	$(CC) $(CFLAGS) $(LFLAGS) -o $@ $^
 
-$(COMMON_OBJECT): $(COMMON_SOURCE)
+tst/obj/%.o: tst/src/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(SUPPRESSIONS): $(SUPPRESSIONS_SOURCE)
+$(VG_SUPPRESSIONS_LIST): $(VG_SUPPRESSIONS_SOURCE)
 	script/gen-suppressions-wrapper.sh $(CC) $< > $@ || (rm $@ && false)
 
-clean-test:
-	rm -f $(TEST_BINARIES) $(COMMON_OBJECT) $(SUPPRESSIONS)
+# ========================================
+# Clean
+# ========================================
+
+clean:
+	rm -f $(ALL_BUILT_FILES)
