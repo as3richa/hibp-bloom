@@ -46,7 +46,7 @@ LIBRARY_ARTIFACTS = $(LIBRARY_OBJECTS) $(LIBRARY)
 TEST_ARTIFACTS = $(TEST_OBJECTS) $(TEST_BINARIES) $(TEST_UTIL_OBJECT) $(VG_SUPPRESSIONS_LIST)
 ALL_ARTIFACTS = $(BINARY_ARTIFACTS) $(LIBRARY_ARTIFACTS) $(TEST_ARTIFACTS)
 
-.PHONY: all bin lib test test-valgrind clean
+.PHONY: all bin lib test test-valgrind clean .gitignore
 
 # Prevent make from nuking our object files between builds
 .SECONDARY:
@@ -102,3 +102,14 @@ $(VG_SUPPRESSIONS_LIST): $(VG_SUPPRESSIONS_SOURCE)
 
 clean:
 	rm -f $(ALL_ARTIFACTS)
+
+# ========================================
+# .gitignore
+# ========================================
+
+.gitignore:
+	@rm -f $@
+	@echo "# Run make .gitignore to regenerate" >> $@
+	@$(foreach ARTIFACT, $(ALL_ARTIFACTS), echo "$(ARTIFACT)" >> $@; )
+	@echo "*.dSYM" >> $@
+	@echo Regenerated $@

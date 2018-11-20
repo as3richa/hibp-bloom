@@ -1,5 +1,17 @@
-*.o
-*.a
-**/bin/*
-*.dSYM
+# Run make .gitignore to regenerate
+obj/bin/main.o
+obj/bin/stream.o
+bin/hibp-bloom
+obj/hibp-bloom.o
+lib/hibp-bloom.a
+tst/obj/test-falseneg.o
+tst/obj/test-falsepos.o
+tst/obj/test-insert-query-variants.o
+tst/obj/test-roundtrip.o
+tst/bin/test-falseneg
+tst/bin/test-falsepos
+tst/bin/test-insert-query-variants
+tst/bin/test-roundtrip
+tst/obj/util.o
 valgrind-suppressions.txt
+*.dSYM
