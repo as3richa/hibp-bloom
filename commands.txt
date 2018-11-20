@@ -7,7 +7,7 @@ create-falsepos <count> <rate>
 load <filename>
 save <filename>
 
-query-output-mode <'boolean' | 'number' | 'bin'
+query-output-mode <'boolean' | 'number' | 'bin'>
 
 insert <string> ...
 insert-sha <sha> ...

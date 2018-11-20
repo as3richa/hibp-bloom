@@ -19,12 +19,13 @@ else
 $(error Bad BUILD: $(BUILD))
 endif
 
-# No implicit rules, please
-.SUFFIXES:
+ifdef LTO
+CFLAGS += -flto
+endif
 
 BINARY_SOURCES = $(shell echo src/bin/*.c)
 BINARY_OBJECTS = $(addprefix obj/bin/, $(notdir $(BINARY_SOURCES:.c=.o)))
-BINARIES=$(addprefix bin/, $(notdir $(BINARY_SOURCES:.c=)))
+BINARY=bin/hibp-bloom
 
 LIBRARY_SOURCES = $(shell echo src/*.c)
 LIBRARY_OBJECTS = $(addprefix obj/, $(notdir $(LIBRARY_SOURCES:.c=.o)))
@@ -40,10 +41,12 @@ TEST_UTIL_OBJECT=$(addprefix tst/obj/, $(notdir $(TEST_UTIL_SOURCE:.c=.o)))
 VG_SUPPRESSIONS_SOURCE=src/misc/suppressions.c
 VG_SUPPRESSIONS_LIST=valgrind-suppressions.txt
 
-ALL_OBJECTS = $(BINARY_OBJECTS) $(LIBRARY_OBJECTS)  $(TEST_OBJECTS)  $(TEST_UTIL_OBJECT) 
-ALL_BUILT_FILES = $(ALL_OBJECTS) $(BINARIES) $(LIBRARY) $(TEST_BINARIES) $(VG_SUPPRESSIONS_LIST)
+BINARY_ARTIFACTS = $(BINARY_OBJECTS) $(BINARY)
+LIBRARY_ARTIFACTS = $(LIBRARY_OBJECTS) $(LIBRARY)
+TEST_ARTIFACTS = $(TEST_OBJECTS) $(TEST_BINARIES) $(TEST_UTIL_OBJECT) $(VG_SUPPRESSIONS_LIST)
+ALL_ARTIFACTS = $(BINARY_ARTIFACTS) $(LIBRARY_ARTIFACTS) $(TEST_ARTIFACTS)
 
-.PHONY: all bin lib test test-valgrind
+.PHONY: all bin lib test test-valgrind clean
 
 # Prevent make from nuking our object files between builds
 .SECONDARY:
@@ -51,12 +54,12 @@ ALL_BUILT_FILES = $(ALL_OBJECTS) $(BINARIES) $(LIBRARY) $(TEST_BINARIES) $(VG_SU
 all: bin lib
 
 # ========================================
-# Binaries
+# Binary
 # ========================================
 
-bin: $(BINARIES)
+bin: $(BINARY)
 
-bin/%: obj/bin/%.o $(LIBRARY)
+$(BINARY): $(BINARY_OBJECTS) $(LIBRARY)
 	$(CC) $(CFLAGS) $(LFLAGS) -o $@ $^
 
 obj/bin/%.o: src/bin/%.c
@@ -98,4 +101,4 @@ $(VG_SUPPRESSIONS_LIST): $(VG_SUPPRESSIONS_SOURCE)
 # ========================================
 
 clean:
-	rm -f $(ALL_BUILT_FILES)
+	rm -f $(ALL_ARTIFACTS)

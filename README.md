@@ -31,6 +31,9 @@ BUILD=debug-valgrind make
 # -fsanitize=address; will not play nice with valgrind
 BUILD=debug-asan make
 
+# Build with -flto. Plays nice with any BUILD level
+LTO=1 make
+
 # Build and run the test suite
 make test
 
