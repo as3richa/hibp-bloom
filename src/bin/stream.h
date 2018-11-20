@@ -16,8 +16,14 @@ typedef struct st_stream {
   /* Character buffered by stream_peek */
   int c;
 
-  /* These are public. name is informational and is passed into the constructor */
+  /* EOF indicator */
+  int eof;
+
+  /* Everything below is public */
+
+  /* name is informational. It's passed into the constructors */
   const char* name;
+
   size_t line;
   size_t column;
 

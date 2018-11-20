@@ -1,4 +1,5 @@
 # Run make .gitignore to regenerate
+obj/bin/executor.o
 obj/bin/main.o
 obj/bin/stream.o
 obj/bin/tokenizer.o

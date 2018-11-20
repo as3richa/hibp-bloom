@@ -3,19 +3,13 @@
 #include <string.h>
 #include <stddef.h>
 #include <ctype.h>
+#include <errno.h>
 #include <assert.h>
 
-#include "hibp-bloom.h"
+#include "executor.h"
 #include "stream.h"
-#include "tokenizer.h"
 
 #include "walls-of-text.h"
-
-static stream_t stream;
-static int stdin_consumed = 0;
-static int filter_initiaized;
-static hibp_bloom_filter_t filter;
-static token_t token;
 
 static void prompt(void);
 
@@ -27,52 +21,85 @@ int main(int argc, char** argv) {
 
   const int interactive = (argc == 1);
 
+  int stdin_consumed = 0;
+  stream_t stream;
+
   if(argc == 1 || (argc == 2 && strcmp(argv[1], "-") == 0)) {
+    /* `bin/hibp-bloom` or `bin/hibp-bloom -`. Read a script from the standard input.
+     * In the first case we're in interactive mode */
+
     stdin_consumed = 1;
     stream_new_file(&stream, stdin, "<standard input>");
+
+    /* Emit a prompt iff we're in interactive mode */
     if(interactive) {
       stream.prompt = prompt;
     }
   } else if(argc == 2) {
+    /* `bin/hibp-bloom some-filename`. Read a script from the given file */
+
     FILE* file = fopen(argv[1], "r");
-    assert(file != NULL); /* FIXME */
+
+    if(file == NULL) {
+      fprintf(stderr, "%s: %s: %s\n", argv[0], argv[1], strerror(errno));
+      return 1;
+    }
+
     stream_new_file(&stream, file, argv[1]);
   } else {
+    /* `bin/hibp-bloom -c 'some; script; text'`. Run the script given inline in argv */
     stream_new_str(&stream, argv[2], "<argv[2]>");
   }
 
-  token_new(&token);
-
+  /* Show a pretty banner in interactive mode */
   if(interactive) {
     fputs(banner, stdout);
   }
 
+  executor_t ex;
+  executor_new(&ex, &stream, stdin_consumed);
+
+  int exit_status = 0;
+
   for(;;) {
-    if(skip_to_command(&stream) == EOF) {
+    executor_exec_one(&ex);
+
+    /* OK; proceed to next command */
+    if(ex.status == EX_OK) {
+      continue;
+    }
+
+    /* EOF; terminate without emitting any errors */
+    if(ex.status == EX_EOF) {
       break;
     }
 
-    for(int i = 0;; i ++) {
-      next_token(&token, &stream);
+    /* Something went wrong. Emit an error message */
+    fprintf(stderr, "%s: %s\n", argv[0], ex.error_str);
 
-      printf("%d  ", i);
-      for(size_t j = 0; j < token.length; j ++) {
-        putchar(token.buffer[j]);
-      }
-      putchar('\n');
-
-      if(token.last_of_command) {
-        break;
-      }
+    /* In interactive mode, we can recover from e.g. parse errors by draining the line and
+     * continuing to chug along; in all other cases, errors are fatal */
+    if(interactive && ex.status == EX_E_RECOVERABLE) {
+      executor_drain_line(&ex);
+      continue;
     }
+
+    /* Die */
+    exit_status = 1;
+    break;
   }
 
-  token_free(&token);
+  if(interactive) {
+    /* Make sure the shell prompt goes on the next line */
+    putchar('\n');
+  }
+
+  executor_destroy(&ex);
 
   /* This may close stdin, but that's okay */
   stream_close(&stream);
 
-  return 0;
+  return exit_status;
 }
 
 static void prompt(void) {

@@ -1,10 +1,21 @@
 #include <stdio.h>
+#include <assert.h>
 
 #include "stream.h"
 
 /* ================================================================
  * Plumbing
  * ================================================================ */
+
+/* Common initialization for both stream constructors */
+static inline void stream_new(stream_t* stream, const char* name) {
+  stream->c = EOF;
+  stream->eof = 0;
+  stream->name = name;
+  stream->line = 1;
+  stream->column = 1;
+  stream->prompt = NULL;
+}
 
 /* Given a stream backed a by a null-terminated string, extract a character from
  * the string and increment the pointer */
@@ -35,27 +46,17 @@ static void stream_file_close(stream_t* stream) {
  * ================================================================ */
 
 void stream_new_file(stream_t* stream, FILE* file, const char* name) {
+  stream_new(stream, name);
   stream->ctx = (void*)file;
   stream->my_getc = stream_file_getc;
   stream->my_close = stream_file_close;
-  stream->c = EOF;
-
-  stream->name = name;
-  stream->line = 1;
-  stream->column = 1;
-  stream->prompt = NULL;
 }
 
 void stream_new_str(stream_t* stream, const char* str, const char* name) {
+  stream_new(stream, name);
   stream->ctx = (void*)str;
   stream->my_getc = stream_str_getc;
   stream->my_close = NULL;
-  stream->c = EOF;
-
-  stream->name = name;
-  stream->line = 1;
-  stream->column = 1;
-  stream->prompt = NULL;
 }
 
 void stream_close(stream_t* stream) {
@@ -66,7 +67,13 @@ void stream_close(stream_t* stream) {
 }
 
 int stream_peek(stream_t* stream) {
-  /* Return the buffer character, if any */
+  /* Don't try to read again if we've already hit an EOF */
+  if(stream->eof) {
+    return EOF;
+  }
+
+  /* Return the buffer character, if any. We use EOF to indicate the absence of a
+   * buffered character - it's not necessarily an actual end-of-file */
   if(stream->c != EOF) {
     return stream->c;
   }
@@ -76,11 +83,20 @@ int stream_peek(stream_t* stream) {
     stream->prompt();
   }
 
-  /* Fetch, buffer, and return a character */
-  return (stream->c = stream->my_getc(stream));
+  /* Fetch and buffer a character */
+  stream->c = stream->my_getc(stream);
+
+  /* Real EOF */
+  if(stream->c == EOF) {
+    stream->eof = 1;
+  }
+
+  return stream->c;
 }
 
 int stream_getc(stream_t* stream) {
+  assert(!stream->eof);
+
   /* Take the buffered character, or possibly read a new one */
   const int c = stream_peek(stream);
 
