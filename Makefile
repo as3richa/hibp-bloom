@@ -23,15 +23,15 @@ ifdef LTO
 CFLAGS += -flto
 endif
 
-BINARY_SOURCES = $(shell echo src/bin/*.c)
+BINARY_SOURCES = $(wildcard src/bin/*.c)
 BINARY_OBJECTS = $(addprefix obj/bin/, $(notdir $(BINARY_SOURCES:.c=.o)))
 BINARY=bin/hibp-bloom
 
-LIBRARY_SOURCES = $(shell echo src/*.c)
+LIBRARY_SOURCES = $(wildcard src/*.c)
 LIBRARY_OBJECTS = $(addprefix obj/, $(notdir $(LIBRARY_SOURCES:.c=.o)))
 LIBRARY=lib/hibp-bloom.a
 
-TEST_SOURCES=$(shell echo tst/src/test-*.c)
+TEST_SOURCES=$(wildcard tst/src/test-*.c)
 TEST_OBJECTS=$(addprefix tst/obj/, $(notdir $(TEST_SOURCES:.c=.o)))
 TEST_BINARIES=$(addprefix tst/bin/, $(notdir $(TEST_SOURCES:.c=)))
 
