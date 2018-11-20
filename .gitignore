@@ -1,6 +1,7 @@
 # Run make .gitignore to regenerate
 obj/bin/main.o
 obj/bin/stream.o
+obj/bin/tokenizer.o
 bin/hibp-bloom
 obj/hibp-bloom.o
 lib/hibp-bloom.a
