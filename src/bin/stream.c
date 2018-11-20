@@ -9,13 +9,15 @@
 /* Given a stream backed a by a null-terminated string, extract a character from
  * the string and increment the pointer */
 static int stream_str_getc(stream_t* stream) {
-  char* str = (char*)stream->ctx;
+  const char* str = (const char*)stream->ctx;
+  const int c = *str;
 
-  if(*str == 0) {
+  if(c == 0) {
     return EOF;
   }
 
-  return *(str ++);
+  stream->ctx = (void*)(str + 1);
+  return c;
 }
 
 /* Given a stream backed by a FILE, extract a character from the file */
@@ -41,9 +43,10 @@ void stream_new_file(stream_t* stream, FILE* file, const char* name) {
   stream->name = name;
   stream->line = 1;
   stream->column = 1;
+  stream->prompt = NULL;
 }
 
-void stream_new_str(stream_t* stream, char* str, const char* name) {
+void stream_new_str(stream_t* stream, const char* str, const char* name) {
   stream->ctx = (void*)str;
   stream->my_getc = stream_str_getc;
   stream->my_close = NULL;
@@ -52,6 +55,7 @@ void stream_new_str(stream_t* stream, char* str, const char* name) {
   stream->name = name;
   stream->line = 1;
   stream->column = 1;
+  stream->prompt = NULL;
 }
 
 void stream_close(stream_t* stream) {
@@ -67,7 +71,12 @@ int stream_peek(stream_t* stream) {
     return stream->c;
   }
 
-  /* Fetch and buffer a character */
+  /* Dispatch prompt hook if necessary */
+  if(stream->prompt && stream->column == 1) {
+    stream->prompt();
+  }
+
+  /* Fetch, buffer, and return a character */
   return (stream->c = stream->my_getc(stream));
 }
 
