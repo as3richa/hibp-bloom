@@ -94,7 +94,7 @@ tst/obj/%.o: tst/src/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(VG_SUPPRESSIONS_LIST): $(VG_SUPPRESSIONS_SOURCE)
-	script/gen-suppressions-wrapper.sh $(CC) $< > $@ || (rm $@ && false)
+	CC=$(CC) script/gen-suppressions.sh $< > $@ || (rm $@ && false)
 
 # ========================================
 # Clean

@@ -4,11 +4,16 @@ set -euo pipefail
 
 echo "Generating valgrind suppressions list..." >&2
 
-CC=$1
-SOURCE=$2
+TMPDIR=$(mktemp -dq)
 
-"$CC" -O0 -lcrypto -o supp "$SOURCE"
-valgrind --tool=memcheck --gen-suppressions=all --leak-check=full ./supp 2>valgrind.out
+trap "exit 1" HUP INT PIPE QUIT TERM
+trap "rm -rf $TMPDIR" EXIT
+
+cp src/misc/suppressions.c "$TMPDIR"
+cd "$TMPDIR"
+
+"$CC" -O0 -lcrypto -o suppressions suppressions.c
+valgrind --tool=memcheck --gen-suppressions=all --leak-check=full ./suppressions 2>valgrind.out
 
 STATE="0"
 IFS=
