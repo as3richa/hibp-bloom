@@ -2,6 +2,7 @@
 obj/bin/executor.o
 obj/bin/main.o
 obj/bin/stream.o
+obj/bin/token.o
 obj/bin/tokenizer.o
 bin/hibp-bloom
 obj/hibp-bloom.o

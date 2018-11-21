@@ -11,35 +11,6 @@
  * Plumbing
  * ================================================================ */
 
-/* Append a character to a given token. Return -1 on allocation failure */
-static inline int token_pushc(token_t* token, int c) {
-  assert(token->length <= token->capacity);
-  assert(c != EOF);
-
-  if(token->length == token->capacity) {
-    if(token->capacity == 0) {
-      token->capacity = 32;
-    } else {
-      token->capacity *= 2;
-    }
-
-    char* buffer = (char*)realloc(token->buffer, token->capacity);
-
-    if(buffer == NULL) {
-      /* FIXME: log error condition */
-      return -1;
-    }
-
-    token->buffer = buffer;
-  }
-
-  assert(token->length < token->capacity);
-
-  token->buffer[token->length ++] = c;
-
-  return 0;
-}
-
 /* Given a character, return its value in hexidecimal, or -1 if the character
  * isn't hexademical */
 static inline int hex2int(int hex) {
@@ -131,26 +102,6 @@ static inline tokenization_status_t parse_quoted_token(token_t* token, stream_t*
 /* ================================================================
  * Public interface
  * ================================================================ */
-
-void token_new(token_t* token) {
-  token->buffer = NULL;
-  token->length = 0;
-  token->capacity = 0;
-}
-
-void token_destroy(token_t* token) {
-  free(token->buffer);
-}
-
-int token_eq(const token_t* token, const char* str) {
-  const size_t length = strlen(str);
-
-  if(token->length != length) {
-    return 0;
-  }
-
-  return (memcmp(token->buffer, str, length) == 0);
-}
 
 int skip_to_command(stream_t* stream) {
   for(;;) {

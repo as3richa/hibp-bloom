@@ -3,21 +3,7 @@
 #include <openssl/sha.h>
 
 #include "executor.h"
-
-static void exec_sha(executor_t* ex);
-
-typedef struct {
-  const char* name;
-  const size_t min_arity;
-  const int needs_filter;
-  void (*exec)(executor_t* ex);
-} command_defn_t;
-
-static const command_defn_t command_defns[] = {
-  { "sha", 1, 0, exec_sha }
-};
-
-static const size_t n_command_defns = sizeof(command_defns) / sizeof(command_defn_t);
+#include "command-defns.h"
 
 static const char* out_of_memory = "Out of memory";
 
@@ -59,6 +45,7 @@ static inline int my_next_token(executor_t* ex) {
       message = "Expected a space after quoted token";
       break;
     default:
+      message = NULL;
       assert(0);
   }
 
@@ -133,16 +120,16 @@ void executor_exec_one(executor_t* ex) {
   }
 
   const token_t* token = &ex->token;
-  const command_defn_t* command_defn = NULL;
+  const command_defn_t* command = NULL;
 
-  for(size_t i = 0; i < n_command_defns; i ++) {
+  for(size_t i = 0; i < n_commands; i ++) {
     if(token_eq(token, command_defns[i].name)) {
-      command_defn = &command_defns[i];
+      command = &command_defns[i];
       break;
     }
   }
 
-  if(command_defn == NULL) {
+  if(command == NULL) {
     ex->status = EX_E_RECOVERABLE;
 
     eprintf(
@@ -153,21 +140,21 @@ void executor_exec_one(executor_t* ex) {
     return;
   }
 
-  if(token->last_of_command && command_defn->min_arity > 0) {
+  if(token->last_of_command && command->min_arity > 0) {
     ex->status = EX_E_RECOVERABLE;
 
     eprintf(
       ex, "%s:%lu:%lu: %s takes at least %lu argument%s",
       stream->name, (unsigned long)token->line, (unsigned long)token->column,
-      command_defn->name,
-      (unsigned long)command_defn->min_arity,
-      ((command_defn->min_arity == 1) ? "" : "s")
+      command->name,
+      (unsigned long)command->min_arity,
+      ((command->min_arity == 1) ? "" : "s")
     );
 
     return;
   }
 
-  command_defn->exec(ex);
+  command->exec(ex);
 }
 
 void executor_drain_line(executor_t* ex) {

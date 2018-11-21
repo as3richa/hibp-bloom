@@ -107,7 +107,9 @@ void hibp_compute_optimal_params(size_t* n_hash_functions, size_t* log2_bits,
  * consumption, calculate appropriate values of n_hash_functions and log2_bits
  * to be passed into hibp_bf_new. Allocator metadata isn't accounted for
  * in memory consumption. This function is best-effort and may exceed max_memory
- * if it can't reasonably be satisfied */
+ * if it can't reasonably be satisfied. Roughly speaking, this function picks the
+ * largest possible log2_bits that would fit within max_memory, then chooses
+ * an appropriate number of hash functions given that choice */
 void hibp_compute_constrained_params(size_t* n_hash_functions, size_t* log2_bits,
                                      size_t count, size_t max_memory);
 

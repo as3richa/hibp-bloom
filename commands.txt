@@ -7,7 +7,7 @@ create-falsepos <count> <rate>
 load <filename>
 save <filename>
 
-query-output-mode <'boolean' | 'number' | 'bin'>
+unload
 
 insert <string> ...
 insert-sha <sha> ...
@@ -18,6 +18,6 @@ query-sha <sha> ...
 insert-file [<'strings' | 'lines' | 'shas' | 'binary-shas' | 'raw'>] <filename>
 query-file [<'strings' | 'lines' | 'shas' | 'binary-shas' | 'raw'>] <filename>
 
-sha <string> ...
+sha <string>
 
 falsepos [<trials>]
