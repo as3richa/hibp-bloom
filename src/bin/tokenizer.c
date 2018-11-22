@@ -25,6 +25,16 @@ static inline int hex2int(int hex) {
   }
 }
 
+/* Given an integer from 0 through 15, return the corresponding hexademical character */
+static inline int int2hex(int i) {
+  assert(0 <= i && i < 16);
+  if(i < 10) {
+    return '0' + i;
+  } else {
+    return 'a' + (i - 10);
+  }
+}
+
 /* Parse an escape sequence for a quoted token (assuming the backslash was
  * already read). Return EOF on parse error */
 static inline int parse_escape_sequence(stream_t* stream) {
@@ -191,4 +201,71 @@ tokenization_status_t next_token(token_t* token, stream_t* stream) {
   token->last_of_command = (c == EOF || c == '\n' || c == ';' || c == '#');
 
   return TS_OK;
+}
+
+char* token2str(const token_t* token) {
+  int needs_quoting = 0;
+  size_t str_length = 0;
+
+  for(size_t i = 0; i < token->length; i ++) {
+    const int c = token->buffer[i];
+
+    if(c == '"' || c == '\n') {
+      needs_quoting = 1;
+      str_length += 2; /* \", \n */
+    } else if(c == '\'' || c == ' ' || c == ';' || c == '#') {
+      needs_quoting = 1;
+      str_length ++; /* verbatim */
+    } else if(!isprint(c)) {
+      needs_quoting = 1;
+      str_length += 4; /* \xhh */
+    } else {
+      str_length ++;
+    }
+  }
+
+  if(needs_quoting) {
+    str_length += 2;
+  }
+
+  char* str = (char*)malloc(str_length + 1);
+
+  if(str == NULL) {
+    return NULL;
+  }
+
+  if(needs_quoting) {
+    str[0] = '"';
+
+    size_t k = 1;
+
+    for(size_t i = 0; i < token->length; i ++) {
+      const int c = token->buffer[i];
+
+      if(c == '"') {
+        str[k ++] = '\\';
+        str[k ++] = '"';
+      } else if(c == '\n') {
+        str[k ++] = '\\';
+        str[k ++] = 'n';
+      } else if(!isprint(c)) {
+        str[k ++] = '\\';
+        str[k ++] = 'x';
+        str[k ++] = int2hex((c >> 4) & 0x0f);
+        str[k ++] = int2hex(c & 0x0f);
+      } else {
+        str[k ++] = c;
+      }
+    }
+
+    assert(k == str_length - 1);
+    str[k] = '"';
+  } else {
+    assert(str_length == token->length);
+    memcpy(str, token->buffer, str_length);
+  }
+
+  str[str_length] = 0;
+
+  return str;
 }

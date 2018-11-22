@@ -38,7 +38,7 @@ void drain_line(stream_t* stream);
 tokenization_status_t next_token(token_t* token, stream_t* stream);
 
 /* If the token contains only printable, non-space characters, copy it verbatim to
- * a freshly-allocated null-terminated string. Otherwise, wrap it in quotes and escape
+ * a freshly-allocated null-terminated string; otherwise, wrap it in quotes and escape
  * any non-printable characters. Returns NULL on allocation failure. This lives here
  * rather than in token.{c,h} because it's basically the inverse of next_token */
 char* token2str(const token_t* token);

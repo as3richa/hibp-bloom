@@ -5,7 +5,7 @@
 typedef struct {
   const char* name;
 
-  const char* example;
+  const char* usage;
   const char* description;
 
   size_t min_arity;
@@ -32,7 +32,7 @@ static const command_defn_t command_defns[] = {
   {
     "create",
     "<n_hash_functions> <log2_bits>",
-    "intialize a Bloom filter with n_hash_functions randomly-chosen hash functions and a bit vector of size (2**log2_bits)",
+    "Intialize a Bloom filter with n_hash_functions randomly-chosen hash functions and a bit vector of size (2**log2_bits).",
     2,
     FILTER_UNREQUIRED,
     exec_create
@@ -41,7 +41,7 @@ static const command_defn_t command_defns[] = {
   {
     "create-maxmem",
     "<count> <max_memory>",
-    "given an expected cardinality and an approximate limit on memory consumption, initialize a Bloom filter with appropriate values of n_hash_functions and log2_bits",
+    "Intialize a Bloom filter with an approximate memory limit, given the expected cardinality of the set.",
     2,
     FILTER_UNREQUIRED,
     exec_create_maxmem
@@ -50,7 +50,7 @@ static const command_defn_t command_defns[] = {
   {
     "create-falsepos",
     "<count> <rate>",
-    "given an expected cardinality and a desired false positive rate, initialize a Bloom filter with appropriate values of n_hash_functions and log2_bits",
+    "Initialize a Bloom filter with an approximate goal false positive rate, given the expected cardinality of the set.",
     2,
     FILTER_UNREQUIRED,
     exec_create_falsepos
@@ -59,7 +59,7 @@ static const command_defn_t command_defns[] = {
   {
     "load",
     "<filename>",
-    "load a previously-saved Bloom filter from disk",
+    "Load a previously-saved Bloom filter from disk.",
     1,
     FILTER_UNREQUIRED,
     exec_load
@@ -68,7 +68,7 @@ static const command_defn_t command_defns[] = {
   {
     "save",
     "<filename>",
-    "save the currently-loaded Bloom filter to disk",
+    "Save the currently-loaded Bloom filter to disk.",
     1,
     FILTER_REQUIRED,
     exec_save
@@ -77,7 +77,7 @@ static const command_defn_t command_defns[] = {
   {
     "unload",
     "",
-    "unload the currently-loaded Bloom filter without persisting it to disk",
+    "Unload the currently-loaded Bloom filter without persisting it to disk.",
     0,
     0,
     exec_unload
@@ -86,7 +86,7 @@ static const command_defn_t command_defns[] = {
   {
     "insert",
     "<string> [... <string>]",
-    "insert one or several string(s) into the currently-loaded Bloom filter",
+    "Insert one or several string(s) into the Bloom filter.",
     1,
     VARIADIC | FILTER_REQUIRED,
     exec_insert
@@ -95,7 +95,7 @@ static const command_defn_t command_defns[] = {
   {
     "insert-sha",
     "<hash> [... <hash>]",
-    "given one or more SHA1 hashes, insert the string(s) represented by those hashes into the filter",
+    "Insert one or several string(s), encoded as SHA1 hashes, into the Bloom filter.",
     1,
     VARIADIC | FILTER_REQUIRED,
     exec_insert_sha
@@ -104,13 +104,25 @@ static const command_defn_t command_defns[] = {
   {
     "query",
     "<string> [... <string>]",
-    "query for the presence of one or several string(s) in the loaded filter"
+    "Query for the presence of one or several string(s) in the Bloom filter.",
+    1,
+    VARIADIC | FILTER_REQUIRED,
+    exec_query_sha
+  },
+
+  {
+    "query-sha",
+    "<hash> [... <hash>]",
+    "Query for the presence of one or several string(s), encoded as SHA1 hashes, in the Bloom filter.",
+    1,
+    VARIADIC | FILTER_REQUIRED,
+    exec_query
   },
 
   {
     "falsepos",
     "",
-    "empirically determine the false positive rate of the currently-loaded Bloom filter",
+    "Empirically test the false positive rate of the currently-loaded Bloom filter by repeated random trials.",
     0,
     FILTER_REQUIRED,
     exec_falsepos
@@ -118,16 +130,20 @@ static const command_defn_t command_defns[] = {
 
   {
     "sha",
-    "<string>"
-    "compute the SHA1 hash of the given string",
+    "<string>",
+    "Compute the SHA1 hash of the given string.",
+    0,
     0,
     exec_sha
   },
 
   {
     "help",
-    "",
-    ""
+    "[command]",
+    "List available commands, or show detailed documentation for one command.",
+    0,
+    VARIADIC,
+    exec_help
   }
 };
 

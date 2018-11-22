@@ -29,7 +29,7 @@ typedef struct {
   /* Everything below is public */
 
   executor_status_t status;
-  char error_str[256 + 1];
+  char error_str[512 + 1];
 } executor_t;
 
 void executor_new(executor_t* ex, stream_t* stream, int stdin_consumed);
