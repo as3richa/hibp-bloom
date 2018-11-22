@@ -5,20 +5,167 @@
 #include <openssl/sha.h>
 
 #include "executor.h"
-#include "command-defns.h"
 
 /* ================================================================
- * Plumbing
+ * Command dispatch table
+ * ================================================================ */
+
+typedef struct {
+  /* name by which the command is invoked */
+  const char* name;
+
+  /* Description of parameters like in a manpage, e.g. <filename> [<encoding>] */
+  const char* usage;
+
+  /* Plain-English description */
+  const char* description;
+
+  size_t min_arity;
+  bool variadic;
+
+  /* Fail if no filter loaded */
+  bool filter_required;
+
+  /* Fail if a filter _is_ loaded - so you don't clobber your work by accident */
+  bool filter_unrequired;
+
+  /* Callback */
+  void (*exec)(executor_t* ex);
+} command_t;
+
+static void exec_create(executor_t* ex);
+static void exec_create_maxmem(executor_t* ex);
+static void exec_create_falsepos(executor_t* ex);
+static void exec_load(executor_t* ex);
+static void exec_save(executor_t* ex);
+static void exec_unload(executor_t* ex);
+static void exec_insert(executor_t* ex);
+static void exec_insert_sha(executor_t* ex);
+static void exec_query(executor_t* ex);
+static void exec_query_sha(executor_t* ex);
+static void exec_falsepos(executor_t* ex);
+static void exec_sha(executor_t* ex);
+static void exec_help(executor_t* ex);
+
+#define N_COMMANDS (sizeof(commands) / sizeof(command_t))
+
+static const command_t commands[] = {
+  {
+    "create",
+    "<n_hash_functions> <log2_bits>",
+    "Intialize a Bloom filter with n_hash_functions randomly-chosen hash functions and a bit vector of size (2**log2_bits).",
+    2, false, false, true,
+    exec_create
+  },
+
+  {
+    "create-maxmem",
+    "<count> <max_memory>",
+    "Intialize a Bloom filter with an approximate memory limit, given the expected cardinality of the set.",
+    2, false, false, true,
+    exec_create_maxmem
+  },
+
+  {
+    "create-falsepos",
+    "<count> <rate>",
+    "Initialize a Bloom filter with an approximate goal false positive rate, given the expected cardinality of the set.",
+    2, false, false, true,
+    exec_create_falsepos
+  },
+
+  {
+    "load",
+    "<filename>",
+    "Load a previously-saved Bloom filter from disk.",
+    1, false, false, true,
+    exec_load
+  },
+
+  {
+    "save",
+    "<filename>",
+    "Save the currently-loaded Bloom filter to disk.",
+    1, false, true, false,
+    exec_save
+  },
+
+  {
+    "unload",
+    "",
+    "Unload the currently-loaded Bloom filter without persisting it to disk.",
+    1, false, true, false,
+    exec_unload
+  },
+
+  {
+    "insert",
+    "<string> [... <string>]",
+    "Insert one or several string(s) into the Bloom filter.",
+    1, true, true, false,
+    exec_insert
+  },
+
+  {
+    "insert-sha",
+    "<hash> [... <hash>]",
+    "Insert one or several string(s), encoded as SHA1 hashes, into the Bloom filter.",
+    1, true, true, false,
+    exec_insert_sha
+  },
+
+  {
+    "query",
+    "<string> [... <string>]",
+    "Query for the presence of one or several string(s) in the Bloom filter.",
+    1, true, true, false,
+    exec_query_sha
+  },
+
+  {
+    "query-sha",
+    "<hash> [... <hash>]",
+    "Query for the presence of one or several string(s), encoded as SHA1 hashes, in the Bloom filter.",
+    1, true, true, false,
+    exec_query
+  },
+
+  {
+    "falsepos",
+    "[<trials>]",
+    "Empirically test the false positive rate of the currently-loaded Bloom filter by repeated random trials.",
+    0, true, true, false,
+    exec_falsepos
+  },
+
+  {
+    "sha",
+    "<string>",
+    "Compute the SHA1 hash of the given string.",
+    1, false, false, false,
+    exec_sha
+  },
+
+  {
+    "help",
+    "[<command>]",
+    "List available commands, or show detailed documentation for one command.",
+    0, true, false, false,
+    exec_help
+  }
+};
+
+/* ================================================================
+ * Types, constants, utilities
  * ================================================================ */
 
 #define OUT_OF_MEMORY_MESSAGE "Out of memory"
-#define NO_SUCH_COMMAND_MESSAGE "No such command %s; try `help` to list available commands"
 
 #define HEX(v) ((0 <= (v) && (v) <= 9) ? ('0' + (v)) : ('a' + (v) - 10))
 
 #define SHA1_BYTES 20
 
-static inline void error(executor_t* ex, executor_status_t status, const char* format, ...) {
+static inline void ex_error(executor_t* ex, executor_status_t status, const char* format, ...) {
   assert(status == EX_E_RECOVERABLE || status == EX_E_FATAL);
 
   ex->status = status;
@@ -36,7 +183,7 @@ static inline void error(executor_t* ex, executor_status_t status, const char* f
   fputc('\n', stderr);
 }
 
-static inline int my_next_token(executor_t* ex) {
+static inline int ex_next_token(executor_t* ex) {
   stream_t* stream = ex->stream;
 
   const tokenization_status_t status = next_token(&ex->token, stream);
@@ -47,7 +194,7 @@ static inline int my_next_token(executor_t* ex) {
 
   /* Allocation failure */
   if(status == TS_E_NOMEM) {
-    error(ex, EX_E_FATAL, "%s", OUT_OF_MEMORY_MESSAGE);
+    ex_error(ex, EX_E_FATAL, "%s", OUT_OF_MEMORY_MESSAGE);
     return -1;
   }
 
@@ -69,12 +216,41 @@ static inline int my_next_token(executor_t* ex) {
       assert(0);
   }
 
-  error(ex, EX_E_RECOVERABLE, "%s", message);
+  ex_error(ex, EX_E_RECOVERABLE, "%s", message);
   return -1;
 }
 
+/* Find a command by the name given in ex->token. Emit an error and return NULL if no matching
+ * command exists */
+const command_t* find_command(executor_t* ex) {
+  const token_t* token = &ex->token;
+
+  for(size_t i = 0; i < N_COMMANDS; i ++) {
+    if(token_eq(&ex->token, commands[i].name)) {
+      return &commands[i];
+    }
+  }
+
+  /* No such command; emit an error */
+
+  /* token isn't necessarily printable (and it's not null-terminated anyway) */
+  char* str = token2str(token);
+
+  /* Swallow any allocation errors from token2str, since we're already
+   * dealing with one failure case */
+  ex_error(
+    ex, EX_E_RECOVERABLE,
+    "No such command %s; try `help` to list available commands",
+    ((str == NULL) ? "" : str)
+  );
+
+  free(str);
+
+  return NULL;
+}
+
 /* ================================================================
- * Commands
+ * Command callbacks
  * ================================================================ */
 
 static void exec_create(executor_t* ex) {
@@ -123,12 +299,12 @@ static void exec_falsepos(executor_t* ex) {
 
 
 static void exec_sha(executor_t* ex) {
-  if(my_next_token(ex) == -1) {
+  if(ex_next_token(ex) == -1) {
     return;
   }
 
   if(!ex->token.last_of_command) {
-    error(ex, EX_E_RECOVERABLE, "%s", "sha takes exactly 1 argument");
+    ex_error(ex, EX_E_RECOVERABLE, "%s", "sha takes exactly 1 argument");
     return;
   }
 
@@ -148,9 +324,8 @@ static void exec_help(executor_t* ex) {
 
     puts("Available commands:");
 
-    for(size_t i = 0; i < n_commands; i ++) {
-      const command_defn_t* command = &command_defns[i];
-      printf("~ %s %s\n", command->name, command->usage);
+    for(size_t i = 0; i < N_COMMANDS; i ++) {
+      printf("~ %s %s\n", commands[i].name, commands[i].usage);
     }
 
     puts("Try `help <command>` to view detailed documentation for a command");
@@ -160,34 +335,18 @@ static void exec_help(executor_t* ex) {
 
   /* Binary version; give help for one particular command */
 
-  if(my_next_token(ex) == -1) {
+  if(ex_next_token(ex) == -1) {
     return;
   }
 
-  const token_t* token = &ex->token;
-  const command_defn_t* command = NULL;
-
-  if(!token->last_of_command) {
-    error(ex, EX_E_RECOVERABLE, "%s", "help takes at most 1 argument");
+  if(!ex->token.last_of_command) {
+    ex_error(ex, EX_E_RECOVERABLE, "%s", "help takes at most 1 argument");
     return;
   }
 
-  for(size_t i = 0; i < n_commands; i ++) {
-    if(token_eq(token, command_defns[i].name)) {
-      command = &command_defns[i];
-      break;
-    }
-  }
+  const command_t* command = find_command(ex);
 
   if(command == NULL) {
-    char* pretty_token = token2str(token);
-
-    /* Swallow allocation error from token2str (if any) since we're already
-     * handling something */
-    error(ex, EX_E_RECOVERABLE, NO_SUCH_COMMAND_MESSAGE, (pretty_token == NULL) ? "" : pretty_token);
-
-    free(pretty_token);
-
     return;
   }
 
@@ -220,46 +379,31 @@ void executor_exec_one(executor_t* ex) {
     return;
   }
 
-  if(my_next_token(ex) == -1) {
+  if(ex_next_token(ex) == -1) {
     return;
   }
 
-  const command_defn_t* command = NULL;
-
-  for(size_t i = 0; i < n_commands; i ++) {
-    if(token_eq(&ex->token, command_defns[i].name)) {
-      command = &command_defns[i];
-      break;
-    }
-  }
+  const command_t* command = find_command(ex);
 
   if(command == NULL) {
-    char* pretty_token = token2str(&ex->token);
-
-    /* Swallow allocation error from token2str (if any) since we're already
-     * handling something */
-    error(ex, EX_E_RECOVERABLE, NO_SUCH_COMMAND_MESSAGE, (pretty_token == NULL) ? "" : pretty_token);
-
-    free(pretty_token);
-
     return;
   }
 
   const bool nullary = ex->token.last_of_command;
 
   if(nullary && command->min_arity > 0) {
-    error(
+    ex_error(
       ex, EX_E_RECOVERABLE,
       "%s takes %s %lu argument%s",
       command->name,
-      ((command->flags & VARIADIC) ? "at least" : "exactly"),
+      (command->variadic ? "at least" : "exactly"),
       (unsigned long)command->min_arity,
       ((command->min_arity == 1) ? "" : "s")
     );
     return;
   }
 
-  /* Just for the assertion below */
+  /* Just for an assertion below. NB. copy the value, not the pointer */
   const token_t prev_token = ex->token;
   (void)prev_token;
 
