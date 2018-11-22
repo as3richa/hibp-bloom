@@ -132,14 +132,14 @@ static const command_defn_t command_defns[] = {
     "sha",
     "<string>",
     "Compute the SHA1 hash of the given string.",
-    0,
+    1,
     0,
     exec_sha
   },
 
   {
     "help",
-    "[command]",
+    "[<command>]",
     "List available commands, or show detailed documentation for one command.",
     0,
     VARIADIC,

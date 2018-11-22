@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <assert.h>
 #include <openssl/sha.h>
 
@@ -10,10 +11,30 @@
  * Plumbing
  * ================================================================ */
 
-static const char* out_of_memory = "Out of memory";
+#define OUT_OF_MEMORY_MESSAGE "Out of memory"
+#define NO_SUCH_COMMAND_MESSAGE "No such command %s; try `help` to list available commands"
 
-#define eprintf(ex, ...) \
-  snprintf((ex)->error_str, sizeof((ex)->error_str), __VA_ARGS__)
+#define HEX(v) ((0 <= (v) && (v) <= 9) ? ('0' + (v)) : ('a' + (v) - 10))
+
+#define SHA1_BYTES 20
+
+static inline void error(executor_t* ex, executor_status_t status, const char* format, ...) {
+  assert(status == EX_E_RECOVERABLE || status == EX_E_FATAL);
+
+  ex->status = status;
+
+  fprintf(
+    stderr, "%s:%lu:%lu: ",
+    ex->stream->name, (unsigned long)ex->token.line, (unsigned long)ex->token.column
+  );
+
+  va_list varargs;
+  va_start(varargs, format);
+  vfprintf(stderr, format, varargs);
+  va_end(varargs);
+
+  fputc('\n', stderr);
+}
 
 static inline int my_next_token(executor_t* ex) {
   stream_t* stream = ex->stream;
@@ -24,15 +45,13 @@ static inline int my_next_token(executor_t* ex) {
     return 0;
   }
 
+  /* Allocation failure */
   if(status == TS_E_NOMEM) {
-    ex->status = EX_E_FATAL;
-    eprintf(ex, "%s", out_of_memory);
+    error(ex, EX_E_FATAL, "%s", OUT_OF_MEMORY_MESSAGE);
     return -1;
   }
 
   /* Parse error of some kind */
-
-  ex->status = EX_E_RECOVERABLE;
 
   char* message;
   switch(status) {
@@ -50,12 +69,7 @@ static inline int my_next_token(executor_t* ex) {
       assert(0);
   }
 
-  eprintf(
-    ex, "%s:%lu:%lu: %s",
-    stream->name, (unsigned long)stream->line, (unsigned long)stream->column,
-    message
-  );
-
+  error(ex, EX_E_RECOVERABLE, "%s", message);
   return -1;
 }
 
@@ -114,34 +128,23 @@ static void exec_sha(executor_t* ex) {
   }
 
   if(!ex->token.last_of_command) {
-    ex->status = EX_E_RECOVERABLE;
-
-    eprintf(
-      ex, "%s:%lu:%lu: sha takes exactly 1 argument",
-      ex->stream->name, (unsigned long)ex->token.line, (unsigned long)ex->token.column
-    );
-
+    error(ex, EX_E_RECOVERABLE, "%s", "sha takes exactly 1 argument");
     return;
   }
 
-  unsigned char sha[20];
-  const int okay = (SHA1((unsigned char*)ex->token.buffer, ex->token.length, sha) != NULL);
-  (void)okay;
-  assert(okay);
+  unsigned char sha[SHA1_BYTES];
+  SHA1((unsigned char*)ex->token.buffer, ex->token.length, sha);
 
   for(size_t i = 0; i < sizeof(sha); i ++) {
-    const unsigned char high = sha[i] >> 4;
-    const unsigned char low = (sha[i] & 0x0f);
-    putchar((0 <= high && high <= 9) ? ('0' + high) : ('a' + high - 10));
-    putchar((0 <= low && low <= 9) ? ('0' + low) : ('a' + low - 10));
+    putchar(HEX(sha[i] >> 4));
+    putchar(HEX(sha[i] & 0xf));
   }
-
   putchar('\n');
 }
 
 static void exec_help(executor_t* ex) {
   if(ex->token.last_of_command) {
-    /* Unary version */
+    /* Unary version; list all available commands */
 
     puts("Available commands:");
 
@@ -155,12 +158,19 @@ static void exec_help(executor_t* ex) {
     return;
   }
 
+  /* Binary version; give help for one particular command */
+
   if(my_next_token(ex) == -1) {
     return;
   }
 
   const token_t* token = &ex->token;
   const command_defn_t* command = NULL;
+
+  if(!token->last_of_command) {
+    error(ex, EX_E_RECOVERABLE, "%s", "help takes at most 1 argument");
+    return;
+  }
 
   for(size_t i = 0; i < n_commands; i ++) {
     if(token_eq(token, command_defns[i].name)) {
@@ -170,16 +180,13 @@ static void exec_help(executor_t* ex) {
   }
 
   if(command == NULL) {
-    ex->status = EX_E_RECOVERABLE;
-
     char* pretty_token = token2str(token);
-    assert(pretty_token != NULL); /* FIXME */
 
-    eprintf(
-      ex, "%s:%lu:%lu: No such command %s; try `help` to list available commands",
-      ex->stream->name, (unsigned long)token->line, (unsigned long)token->column,
-      pretty_token
-    );
+    /* Swallow allocation error from token2str (if any) since we're already
+     * handling something */
+    error(ex, EX_E_RECOVERABLE, NO_SUCH_COMMAND_MESSAGE, (pretty_token == NULL) ? "" : pretty_token);
+
+    free(pretty_token);
 
     return;
   }
@@ -217,49 +224,53 @@ void executor_exec_one(executor_t* ex) {
     return;
   }
 
-  const token_t* token = &ex->token;
   const command_defn_t* command = NULL;
 
   for(size_t i = 0; i < n_commands; i ++) {
-    if(token_eq(token, command_defns[i].name)) {
+    if(token_eq(&ex->token, command_defns[i].name)) {
       command = &command_defns[i];
       break;
     }
   }
 
   if(command == NULL) {
-    ex->status = EX_E_RECOVERABLE;
+    char* pretty_token = token2str(&ex->token);
 
-    char* pretty_token = token2str(token);
-    assert(pretty_token != NULL); /* FIXME */
-
-    eprintf(
-      ex, "%s:%lu:%lu: No such command %s; try `help` to list available commands",
-      stream->name, (unsigned long)token->line, (unsigned long)token->column,
-      pretty_token
-    );
+    /* Swallow allocation error from token2str (if any) since we're already
+     * handling something */
+    error(ex, EX_E_RECOVERABLE, NO_SUCH_COMMAND_MESSAGE, (pretty_token == NULL) ? "" : pretty_token);
 
     free(pretty_token);
 
     return;
   }
 
-  if(token->last_of_command && command->min_arity > 0) {
-    ex->status = EX_E_RECOVERABLE;
+  const bool nullary = ex->token.last_of_command;
 
-    eprintf(
-      ex, "%s:%lu:%lu: %s takes %s %lu argument%s",
-      stream->name, (unsigned long)token->line, (unsigned long)token->column,
+  if(nullary && command->min_arity > 0) {
+    error(
+      ex, EX_E_RECOVERABLE,
+      "%s takes %s %lu argument%s",
       command->name,
       ((command->flags & VARIADIC) ? "at least" : "exactly"),
       (unsigned long)command->min_arity,
       ((command->min_arity == 1) ? "" : "s")
     );
-
     return;
   }
 
+  /* Just for the assertion below */
+  const token_t prev_token = ex->token;
+  (void)prev_token;
+
   command->exec(ex);
+
+  /* Sanity checks: if the command was nullary, it shouldn't have read any new tokens at
+   * all; irrespective of arity, if the command succeeded then the last-read token
+   * should be the last token of the command */
+
+  assert(!nullary || (ex->token.line == prev_token.line && ex->token.column == prev_token.column));
+  assert(ex->status != EX_OK || ex->token.last_of_command);
 }
 
 void executor_drain_line(executor_t* ex) {

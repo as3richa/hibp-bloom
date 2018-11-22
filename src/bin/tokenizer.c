@@ -68,8 +68,7 @@ static inline int parse_escape_sequence(stream_t* stream) {
   }
 }
 
-/* Parse a quoted token from the given stream. Return TS_E_UNRECOVERABLE for
- * allocation failure */
+/* Parse a quoted token from the given stream */
 static inline tokenization_status_t parse_quoted_token(token_t* token, stream_t* stream) {
   const int quote = stream_getc(stream);
   assert(quote == '"' || quote == '\'');
@@ -115,65 +114,65 @@ static inline tokenization_status_t parse_quoted_token(token_t* token, stream_t*
 
 int skip_to_command(stream_t* stream) {
   for(;;) {
-    const int c = stream_peek(stream);
-
-    /* Skip any whitespace or semicolons */
-    if(c == EOF || (!isspace(c) && c != ';')) {
-      break;
-    }
-
-    stream_getc(stream);
-  }
-
-  /* Read all the way to the end of the line or EOF in the case of a comment */
-  if(stream_peek(stream) == '#') {
+    /* Skip whitespace and semicolons */
     for(;;) {
-      const int c = stream_getc(stream);
+      const int c = stream_peek(stream);
 
-      if(c == EOF || c == '\n') {
+      if(c == EOF || (!isspace(c) && c != ';')) {
         break;
       }
+
+      stream_getc(stream);
     }
-  }
 
-  /* Return EOF iff stream is exhausted */
-  return stream_peek(stream);
-}
+    /* Drain to the end of the line or EOF in the case of a comment */
+    if(stream_peek(stream) == '#') {
+      drain_line(stream);
+    }
 
-void drain_line(stream_t* stream) {
-  for(;;) {
     const int c = stream_peek(stream);
 
-    if(c == EOF || c == '\n') {
-      break;
-    }
+    /* If we slurped up a comment we may have landed on another line with skippable
+     * characters, in which case we need to do another iteration */
 
-    stream_getc(stream);
+    if(c == EOF || (!isspace(c) && c != ';' && c != '#')) {
+      return c;
+    }
   }
 }
 
 tokenization_status_t next_token(token_t* token, stream_t* stream) {
-  skip_to_command(stream);
-  assert(stream_peek(stream) != EOF);
+  bool quoted;
+
+  {
+    const int c = stream_peek(stream);
+
+    /* Command is not exhausted */
+    assert(c != EOF && c != '\n' && c != ';' && c != '#');
+
+    /* stream is pointing at the first character of the next token
+     * (i.e. no leading spaces) */
+    assert(!isspace(c));
+
+    quoted = (c == '"' || c == '\'');
+  }
 
   token->line = stream->line;
   token->column = stream->column;
+
   token->length = 0;
 
-  const int maybe_quote = stream_peek(stream);
-
-  if(maybe_quote == '"' || maybe_quote == '\'') {
+  if(quoted) {
     const tokenization_status_t status = parse_quoted_token(token, stream);
 
     if(status != TS_OK) {
       return status;
     }
   } else {
-
     for(;;) {
       const int c = stream_peek(stream);
 
-      if(c == EOF || isspace(c) || c == ';') {
+      if(c == EOF || isspace(c) || c == ';' || c == '#') {
         break;
       }
 
@@ -185,7 +184,7 @@ tokenization_status_t next_token(token_t* token, stream_t* stream) {
     }
   }
 
-  /* Drain trailing spaces */
+  /* Drain trailing (non-newline) spaces */
   for(;;) {
     const int c = stream_peek(stream);
 
@@ -203,7 +202,23 @@ tokenization_status_t next_token(token_t* token, stream_t* stream) {
   return TS_OK;
 }
 
+void drain_line(stream_t* stream) {
+  for(;;) {
+    const int c = stream_peek(stream);
+
+    if(c == EOF || c == '\n') {
+      break;
+    }
+
+    stream_getc(stream);
+  }
+}
+
 char* token2str(const token_t* token) {
+  if(token->length == 0) {
+    return strdup("\"\"");
+  }
+
   int needs_quoting = 0;
   size_t str_length = 0;
 

@@ -4,8 +4,8 @@ static const char* usage =
   "  %s                start an interactive session\n"
   "  %s -              read and run a script from the standard input\n"
   "  %s <filename>     read and run the script specified by filename\n"
-  "  %s -c <commands>  run given sequence of commands from the second argument\n\n"
-  "Run `help` in an interactive session to learn about the hibp-bloom scripting language\n";
+  "  %s -c <commands>  run a sequence of commands from the second argument\n\n"
+  "Run `help` in an interactive session to learn about the scripting language\n";
 
 static const char* banner =
   "=====================================================================\n"

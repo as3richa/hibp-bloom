@@ -74,9 +74,6 @@ int main(int argc, char** argv) {
       break;
     }
 
-    /* Something went wrong. Emit an error message */
-    fprintf(stderr, "%s: %s\n", argv[0], ex.error_str);
-
     /* In interactive mode, we can recover from e.g. parse errors by draining the line and
      * continuing to chug along; in all other cases, errors are fatal */
     if(interactive && ex.status == EX_E_RECOVERABLE) {

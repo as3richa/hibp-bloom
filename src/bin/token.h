@@ -1,6 +1,10 @@
 #ifndef _TOKEN_H_
 #define _TOKEN_H_
 
+#include <stddef.h>
+
+#include "bool.h"
+
 typedef struct {
   size_t capacity;
 
@@ -12,9 +16,8 @@ typedef struct {
   char* buffer;
   size_t length;
 
-  /* Is this the last token of the current command?
-   * */
-  int last_of_command;
+  /* Is this the last token of the current command? */
+  bool last_of_command;
 } token_t;
 
 /* Memory is allocated lazily, so token_new can't fail */
