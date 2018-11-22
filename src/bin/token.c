@@ -34,7 +34,6 @@ int token_pushc(token_t* token, int c) {
     char* buffer = (char*)realloc(token->buffer, token->capacity);
 
     if(buffer == NULL) {
-      /* FIXME: log error condition(?) */
       return -1;
     }
 

@@ -10,7 +10,7 @@
  * Command dispatch table
  * ================================================================ */
 
-typedef struct {
+typedef struct st_command {
   /* name by which the command is invoked */
   const char* name;
 
@@ -30,22 +30,22 @@ typedef struct {
   bool filter_unrequired;
 
   /* Callback */
-  void (*exec)(executor_t* ex);
+  void (*exec)(executor_t* ex, const struct st_command* command);
 } command_t;
 
-static void exec_create(executor_t* ex);
-static void exec_create_maxmem(executor_t* ex);
-static void exec_create_falsepos(executor_t* ex);
-static void exec_load(executor_t* ex);
-static void exec_save(executor_t* ex);
-static void exec_unload(executor_t* ex);
-static void exec_insert(executor_t* ex);
-static void exec_insert_sha(executor_t* ex);
-static void exec_query(executor_t* ex);
-static void exec_query_sha(executor_t* ex);
-static void exec_falsepos(executor_t* ex);
-static void exec_sha(executor_t* ex);
-static void exec_help(executor_t* ex);
+static void exec_create(executor_t* ex, const command_t* command);
+static void exec_create_maxmem(executor_t* ex, const command_t* command);
+static void exec_create_falsepos(executor_t* ex, const command_t* command);
+static void exec_load(executor_t* ex, const command_t* command);
+static void exec_save(executor_t* ex, const command_t* command);
+static void exec_unload(executor_t* ex, const command_t* command);
+static void exec_insert(executor_t* ex, const command_t* command);
+static void exec_insert_sha(executor_t* ex, const command_t* command);
+static void exec_query(executor_t* ex, const command_t* command);
+static void exec_query_sha(executor_t* ex, const command_t* command);
+static void exec_falsepos(executor_t* ex, const command_t* command);
+static void exec_sha(executor_t* ex, const command_t* command);
+static void exec_help(executor_t* ex, const command_t* command);
 
 #define N_COMMANDS (sizeof(commands) / sizeof(command_t))
 
@@ -183,6 +183,17 @@ static inline void ex_error(executor_t* ex, executor_status_t status, const char
   fputc('\n', stderr);
 }
 
+static inline void ex_arity_error(executor_t* ex, const command_t* command) {
+  ex_error(
+    ex, EX_E_RECOVERABLE,
+    "%s takes %s %lu argument%s",
+    command->name,
+    (command->variadic ? "at least" : "exactly"),
+    (unsigned long)command->min_arity,
+    ((command->min_arity == 1) ? "" : "s")
+  );
+}
+
 static inline int ex_next_token(executor_t* ex) {
   stream_t* stream = ex->stream;
 
@@ -220,6 +231,27 @@ static inline int ex_next_token(executor_t* ex) {
   return -1;
 }
 
+inline const char* hibp_strerror(hibp_status_t status) {
+  /* FIXME: think about these messages a bit more */
+  switch(status) {
+    case HIBP_E_NOMEM:
+      return OUT_OF_MEMORY_MESSAGE;
+    case HIBP_E_VERSION:
+      return "Bad version string; file is not an hibp-bloom filter, or may be corrupted";
+    case HIBP_E_IO:
+      return "Unexpected end of file; file is likely corrupted";
+    case HIBP_E_CHECKSUM:
+      return "Failed checksum validation; file is likely corrupted";
+    case HIBP_E_2BIG:
+      return "Filter parameters exceed size limits";
+    case HIBP_E_INVAL:
+      return "Filter parameters are invalid; file is likely corrupted";
+    default:
+      assert(0);
+      return NULL;
+  }
+}
+
 /* Find a command by the name given in ex->token. Emit an error and return NULL if no matching
  * command exists */
 const command_t* find_command(executor_t* ex) {
@@ -253,58 +285,107 @@ const command_t* find_command(executor_t* ex) {
  * Command callbacks
  * ================================================================ */
 
-static void exec_create(executor_t* ex) {
-  (void)ex;
-}
+static void exec_create(executor_t* ex, const command_t* command) {
+  assert(!ex->filter_initialized);
 
-static void exec_create_maxmem(executor_t* ex) {
-  (void)ex;
-}
+  size_t n_hash_functions;
+  size_t log2_bits;
 
-static void exec_create_falsepos(executor_t* ex) {
-  (void)ex;
-}
+  /* Read n_hash_functions */
 
-static void exec_load(executor_t* ex) {
-  (void)ex;
-}
+  if(ex_next_token(ex) == -1) {
+    return;
+  }
 
-static void exec_save(executor_t* ex) {
-  (void)ex;
-}
+  if(ex->token.last_of_command) {
+    ex_arity_error(ex, command);
+    return;
+  }
 
-static void exec_unload(executor_t* ex) {
-  (void)ex;
-}
+  if(token2size(&n_hash_functions, &ex->token) == -1 || n_hash_functions == 0) {
+    ex_error(ex, EX_E_RECOVERABLE, "n_hash_functions must be a positive integer");
+    return;
+  }
 
-static void exec_insert(executor_t* ex) {
-  (void)ex;
-}
+  /* Read log2_bits */
 
-static void exec_insert_sha(executor_t* ex) {
- (void)ex;
-}
-
-static void exec_query(executor_t* ex) {
-  (void)ex;
-}
-
-static void exec_query_sha(executor_t* ex) {
-  (void)ex;
-}
-
-static void exec_falsepos(executor_t* ex) {
-  (void)ex;
-}
-
-
-static void exec_sha(executor_t* ex) {
   if(ex_next_token(ex) == -1) {
     return;
   }
 
   if(!ex->token.last_of_command) {
-    ex_error(ex, EX_E_RECOVERABLE, "%s", "sha takes exactly 1 argument");
+    ex_arity_error(ex, command);
+    return;
+  }
+
+  if(token2size(&log2_bits, &ex->token) == -1 || n_hash_functions == 0) {
+    ex_error(ex, EX_E_RECOVERABLE, "log2_bits must be a positive integer");
+    return;
+  }
+
+  /* Initialize filter */
+
+  hibp_status_t status = hibp_bf_new(&ex->filter, n_hash_functions, log2_bits);
+
+  if(status == HIBP_OK) {
+    ex->filter_initialized = true;
+    return;
+  }
+
+  ex_error(
+    ex, ((status == HIBP_E_NOMEM) ? EX_E_FATAL : EX_E_RECOVERABLE),
+    hibp_strerror(status)
+  );
+}
+
+static void exec_create_maxmem(executor_t* ex, const command_t* command) {
+  (void)ex;
+}
+
+static void exec_create_falsepos(executor_t* ex, const command_t* command) {
+  (void)ex;
+}
+
+static void exec_load(executor_t* ex, const command_t* command) {
+  (void)ex;
+}
+
+static void exec_save(executor_t* ex, const command_t* command) {
+  (void)ex;
+}
+
+static void exec_unload(executor_t* ex, const command_t* command) {
+  (void)ex;
+}
+
+static void exec_insert(executor_t* ex, const command_t* command) {
+  (void)ex;
+}
+
+static void exec_insert_sha(executor_t* ex, const command_t* command) {
+ (void)ex;
+}
+
+static void exec_query(executor_t* ex, const command_t* command) {
+  (void)ex;
+}
+
+static void exec_query_sha(executor_t* ex, const command_t* command) {
+  (void)ex;
+}
+
+static void exec_falsepos(executor_t* ex, const command_t* command) {
+  (void)ex;
+}
+
+
+static void exec_sha(executor_t* ex, const command_t* command) {
+  if(ex_next_token(ex) == -1) {
+    return;
+  }
+
+  if(!ex->token.last_of_command) {
+    ex_arity_error(ex, command);
     return;
   }
 
@@ -318,7 +399,7 @@ static void exec_sha(executor_t* ex) {
   putchar('\n');
 }
 
-static void exec_help(executor_t* ex) {
+static void exec_help(executor_t* ex, const command_t* command) {
   if(ex->token.last_of_command) {
     /* Unary version; list all available commands */
 
@@ -344,13 +425,16 @@ static void exec_help(executor_t* ex) {
     return;
   }
 
-  const command_t* command = find_command(ex);
+  const command_t* requested_command = find_command(ex);
 
-  if(command == NULL) {
+  if(requested_command == NULL) {
     return;
   }
 
-  printf("\n  USAGE: %s %s\n  %s\n\n", command->name, command->usage, command->description);
+  printf(
+    "\n  USAGE: %s %s\n  %s\n\n",
+    requested_command->name, requested_command->usage, requested_command->description
+  );
 }
 
 /* ================================================================
@@ -392,13 +476,24 @@ void executor_exec_one(executor_t* ex) {
   const bool nullary = ex->token.last_of_command;
 
   if(nullary && command->min_arity > 0) {
+    ex_arity_error(ex, command);
+    return;
+  }
+
+  if(command->filter_required && !ex->filter_initialized) {
     ex_error(
       ex, EX_E_RECOVERABLE,
-      "%s takes %s %lu argument%s",
-      command->name,
-      (command->variadic ? "at least" : "exactly"),
-      (unsigned long)command->min_arity,
-      ((command->min_arity == 1) ? "" : "s")
+      "%s requires a loaded Bloom filter; try `help` to learn how to create or load a filter",
+      command->name
+    );
+    return;
+  }
+
+  if(command->filter_unrequired && ex->filter_initialized) {
+    ex_error(
+      ex, EX_E_RECOVERABLE,
+      "%s would overwrite the already-loaded filter; run `save` and `unload` first",
+      command->name
     );
     return;
   }
@@ -407,7 +502,7 @@ void executor_exec_one(executor_t* ex) {
   const token_t prev_token = ex->token;
   (void)prev_token;
 
-  command->exec(ex);
+  command->exec(ex, command);
 
   /* Sanity checks: if the command was nullary, it shouldn't have read any new tokens at
    * all; irrespective of arity, if the command succeeded then the last-read token
