@@ -263,6 +263,17 @@ static inline size_t min(size_t x, size_t y) {
  * Public API
  * ================================================================ */
 
+/* FIXME */
+void hibp_bf_get_info(hibp_filter_info_t* info, const hibp_bloom_filter_t* bf) {
+  size_t buffer_size;
+  compute_buffer_size(&buffer_size, bf->n_hash_functions, bf->log2_bits);
+
+  info->n_hash_functions = bf->n_hash_functions;
+  info->log2_bits = bf->log2_bits;
+  info->bits = (((size_t)1) << bf->log2_bits);
+  info->memory = sizeof(*bf) + buffer_size;
+}
+
 /* == Utilities == */
 
 void hibp_compute_optimal_params(size_t* n_hash_functions, size_t* log2_bits, size_t count, double fp) {

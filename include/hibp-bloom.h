@@ -35,6 +35,16 @@ typedef struct {
   hibp_byte_t* buffer;
 } hibp_bloom_filter_t;
 
+/* FIXME: move this somewhere sane and document it */
+typedef struct {
+  size_t n_hash_functions;
+  size_t log2_bits;
+  size_t bits;
+  size_t memory;
+} hibp_filter_info_t;
+
+void hibp_bf_get_info(hibp_filter_info_t* info, const hibp_bloom_filter_t* bf);
+
 /* ================================================================
  * Error codes
  * ================================================================ */

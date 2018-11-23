@@ -40,8 +40,9 @@ int main(int argc, char** argv) {
 
     FILE* file = fopen(argv[1], "r");
 
+    /* FIXME: errno isn't necessarily set by fopen */
     if(file == NULL) {
-      fprintf(stderr, "%s: %s: %s\n", argv[0], argv[1], strerror(errno));
+      fprintf(stderr, "%s: %s\n", argv[1], strerror(errno));
       return 1;
     }
 

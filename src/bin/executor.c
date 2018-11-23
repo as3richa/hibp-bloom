@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <string.h>
+#include <errno.h>
 #include <assert.h>
 #include <openssl/sha.h>
 
@@ -33,6 +35,7 @@ typedef struct st_command {
   void (*exec)(executor_t* ex, const struct st_command* command);
 } command_t;
 
+static void exec_status(executor_t* ex, const command_t* command);
 static void exec_create(executor_t* ex, const command_t* command);
 static void exec_create_maxmem(executor_t* ex, const command_t* command);
 static void exec_create_falsepos(executor_t* ex, const command_t* command);
@@ -50,6 +53,14 @@ static void exec_help(executor_t* ex, const command_t* command);
 #define N_COMMANDS (sizeof(commands) / sizeof(command_t))
 
 static const command_t commands[] = {
+  {
+    "status",
+    "",
+    "Show information about the currently-loaded Bloom filter",
+    0, false, true, false,
+    exec_status
+  },
+
   {
     "create",
     "<n_hash_functions> <log2_bits>",
@@ -119,7 +130,7 @@ static const command_t commands[] = {
     "<string> [... <string>]",
     "Query for the presence of one or several string(s) in the Bloom filter.",
     1, true, true, false,
-    exec_query_sha
+    exec_query
   },
 
   {
@@ -127,7 +138,7 @@ static const command_t commands[] = {
     "<hash> [... <hash>]",
     "Query for the presence of one or several string(s), encoded as SHA1 hashes, in the Bloom filter.",
     1, true, true, false,
-    exec_query
+    exec_query_sha
   },
 
   {
@@ -281,9 +292,105 @@ const command_t* find_command(executor_t* ex) {
   return NULL;
 }
 
+FILE* ex_fopen(executor_t* ex, bool in, bool binary) {
+  const char* mode;
+
+  if(binary) {
+    mode = (in ? "rb" : "wb");
+  } else {
+    mode = (in ? "r" : "w");
+  }
+
+  /* stdin / stdout */
+  if(token_eq(&ex->token, "-")) {
+    FILE* file;
+
+    if(in) {
+      /* We can only consume stdin once */
+      if(ex->stdin_consumed) {
+        ex_error(ex, EX_E_RECOVERABLE, "standard input has already been consumed");
+        return NULL;
+      }
+
+      file = freopen(NULL, mode, stdin);
+    } else {
+      file = freopen(NULL, mode, stdout);
+    }
+
+    /* FIXME: freopen doesn't necessarily set errno */
+    if(file == NULL) {
+      ex_error(ex, EX_E_FATAL, "%s", strerror(errno));
+      return NULL;
+    }
+
+    return file;
+  }
+
+  /* Regular file */
+
+  for(size_t i = 0; i < ex->token.length; i ++) {
+    if(ex->token.buffer[i] == 0) {
+      ex_error(ex, EX_E_RECOVERABLE, "null byte in filename");
+      return NULL;
+    }
+  }
+
+  char* filename = (char*)malloc(ex->token.length + 1);
+
+  if(filename == NULL) {
+    ex_error(ex, EX_E_FATAL, OUT_OF_MEMORY_MESSAGE);
+    return NULL;
+  }
+
+  memcpy(filename, ex->token.buffer, ex->token.length);
+  filename[ex->token.length] = 0;
+
+  FILE* file = fopen(filename, mode);
+
+  free(filename);
+
+  /* FIXME: fopen doesn't necessarily set errno */
+  if(file == NULL) {
+    ex_error(ex, EX_E_FATAL, "%s", strerror(errno));
+    return NULL;
+  }
+
+  return file;
+}
+
+void ex_fclose(FILE* file) {
+  if(file == stdin || file == stdout) {
+    return;
+  }
+
+  /* FIXME: check for errors */
+  fclose(file);
+}
+
 /* ================================================================
  * Command callbacks
  * ================================================================ */
+
+static void exec_status(executor_t* ex, const command_t* command) {
+  assert(ex->filter_initialized);
+
+  const char* format =
+    "n_hash_functions:  %u\n"
+    "log2_bits:         %u\n"
+    "Bits:              %u\n"
+    "Total memory:      %.2lf MB\n";
+
+  hibp_filter_info_t info;
+  hibp_bf_get_info(&info, &ex->filter);
+
+  printf(
+    format,
+    (unsigned long)info.n_hash_functions,
+    (unsigned long)info.log2_bits,
+    (unsigned long)info.bits,
+    info.memory / (double)(1024 * 1024)
+  );
+}
 
 static void exec_create(executor_t* ex, const command_t* command) {
   assert(!ex->filter_initialized);
@@ -347,11 +454,68 @@ static void exec_create_falsepos(executor_t* ex, const command_t* command) {
 }
 
 static void exec_load(executor_t* ex, const command_t* command) {
-  (void)ex;
+  assert(!ex->filter_initialized);
+
+  if(ex_next_token(ex) == -1) {
+    return;
+  }
+
+  if(!ex->token.last_of_command) {
+    ex_arity_error(ex, command);
+    return;
+  }
+
+  FILE* file = ex_fopen(ex, true, true);
+
+  if(file == NULL) {
+    return;
+  }
+
+  const hibp_status_t status = hibp_bf_load_file(&ex->filter, file);
+
+  ex_fclose(file);
+
+  if(status == HIBP_OK) {
+    ex->filter_initialized = 1;
+    return;
+  }
+
+  assert(status == HIBP_E_IO);
+
+  /* FIXME: errno isn't necessarily set by fwrite and friends */
+  ex_error(ex, EX_E_RECOVERABLE, "%s", strerror(errno));
 }
 
 static void exec_save(executor_t* ex, const command_t* command) {
-  (void)ex;
+  assert(ex->filter_initialized);
+
+  if(ex_next_token(ex) == -1) {
+    return;
+  }
+
+  if(!ex->token.last_of_command) {
+    ex_arity_error(ex, command);
+    return;
+  }
+
+  FILE* file = ex_fopen(ex, false, true);
+
+  if(file == NULL) {
+    return;
+  }
+
+  const hibp_status_t status = hibp_bf_save_file(&ex->filter, file);
+
+  ex_fclose(file);
+
+  if(status == HIBP_OK) {
+    return;
+  }
+
+  assert(status == HIBP_E_IO);
+
+  /* FIXME: errno isn't necessarily set by fwrite and friends */
+  ex_error(ex, EX_E_RECOVERABLE, "%s", strerror(errno));
 }
 
 static void exec_unload(executor_t* ex, const command_t* command) {
@@ -359,7 +523,17 @@ static void exec_unload(executor_t* ex, const command_t* command) {
 }
 
 static void exec_insert(executor_t* ex, const command_t* command) {
-  (void)ex;
+  (void)command;
+
+  assert(ex->filter_initialized);
+
+  do {
+    if(ex_next_token(ex) == -1) {
+      return;
+    }
+
+    hibp_bf_insert(&ex->filter, ex->token.length, (hibp_byte_t*)ex->token.buffer);
+  } while(!ex->token.last_of_command);
 }
 
 static void exec_insert_sha(executor_t* ex, const command_t* command) {
@@ -368,6 +542,34 @@ static void exec_insert_sha(executor_t* ex, const command_t* command) {
 
 static void exec_query(executor_t* ex, const command_t* command) {
   (void)ex;
+
+  assert(ex->filter_initialized);
+
+  do {
+    if(ex_next_token(ex) == -1) {
+      return;
+    }
+
+    const bool found = hibp_bf_query(&ex->filter, ex->token.length, (hibp_byte_t*)ex->token.buffer);
+
+    char* str = token2str(&ex->token);
+
+    if(str == NULL) {
+      ex_error(ex, EX_E_FATAL, OUT_OF_MEMORY_MESSAGE);
+      return;
+    }
+
+    printf("%s", str);
+
+    for(size_t i = strlen(str); i < 40; i ++) {
+      putchar(' ');
+    }
+
+    free(str);
+
+    puts(found ? "true" : "false");
+
+  } while(!ex->token.last_of_command);
 }
 
 static void exec_query_sha(executor_t* ex, const command_t* command) {
