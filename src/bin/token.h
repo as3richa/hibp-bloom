@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 
+#include "hibp-bloom.h"
 #include "bool.h"
 
 typedef struct {
@@ -34,5 +35,6 @@ int token_eq(const token_t* token, const char* str);
  * tolerate trailing characters not part of the value */
 int token2double(double* value, const token_t* token);
 int token2size(size_t* value, const token_t* token);
+int token2sha(hibp_byte_t* sha, const token_t* token);
 
 #endif

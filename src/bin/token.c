@@ -109,3 +109,40 @@ int token2size(size_t* value, const token_t* token) {
 
   return 0;
 }
+
+/* FIXME: dedupe this (tokenizer.c) */
+static inline int hex2int(int hex) {
+  if('0' <= hex && hex <= '9') {
+    return hex - '0';
+  } else if('a' <= hex && hex <= 'z')  {
+    return 10 + hex - 'a';
+  } else if('A' <= hex && hex <= 'Z') {
+    return 10 + hex - 'A';
+  } else {
+    return -1;
+  }
+}
+
+int token2sha(hibp_byte_t* sha, const token_t* token) {
+  if(token->length != 40) {
+    return -1;
+  }
+
+  for(size_t j = 0; j < 20; j ++) {
+    int high = hex2int(token->buffer[2 * j]);
+
+    if(high == -1) {
+      return -1;
+    }
+
+    int low = hex2int(token->buffer[2 * j + 1]);
+
+    if(low == -1) {
+      return -1;
+    }
+
+    sha[j] = ((high << 4) | low);
+  }
+
+  return 0;
+}

@@ -28,6 +28,7 @@ static inline int hex2int(int hex) {
 /* Given an integer from 0 through 15, return the corresponding hexademical character */
 static inline int int2hex(int i) {
   assert(0 <= i && i < 16);
+
   if(i < 10) {
     return '0' + i;
   } else {

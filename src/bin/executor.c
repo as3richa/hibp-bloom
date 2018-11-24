@@ -105,7 +105,7 @@ static const command_t commands[] = {
     "unload",
     "",
     "Unload the currently-loaded Bloom filter without persisting it to disk.",
-    1, false, true, false,
+    0, false, true, false,
     exec_unload
   },
 
@@ -171,15 +171,29 @@ static const command_t commands[] = {
  * ================================================================ */
 
 #define OUT_OF_MEMORY_MESSAGE "Out of memory"
+#define BAD_SHA_MESSAGE "expected a SHA1 hash (40 hexademical digits)"
 
 #define HEX(v) ((0 <= (v) && (v) <= 9) ? ('0' + (v)) : ('a' + (v) - 10))
 
 #define SHA1_BYTES 20
 
-static inline void ex_error(executor_t* ex, executor_status_t status, const char* format, ...) {
+static inline void fail(executor_t* ex, executor_status_t status, const token_t* token, const char* format, ...) {
   assert(status == EX_E_RECOVERABLE || status == EX_E_FATAL);
 
   ex->status = status;
+
+  unsigned long line;
+  unsigned long column;
+
+  if(token != NULL) {
+    line = (unsigned long)token->line;
+    column = (unsigned long)token->column;
+  } else {
+    line = (unsigned long)ex->stream->line;
+    column = (unsigned long)ex->stream->column;
+  }
+
+  fprintf(stderr, "%s:%lu:%lu: ", ex->stream->name, line, column);
 
   va_list varargs;
   va_start(varargs, format);
@@ -190,9 +204,9 @@ static inline void ex_error(executor_t* ex, executor_status_t status, const char
 }
 
 static inline int ex_next_token(token_t* token, executor_t* ex) {
-  stream_t* stream = ex->stream;
+  token_new(token);
 
-  const tokenization_status_t status = next_token(token, stream);
+  const tokenization_status_t status = next_token(token, ex->stream);
 
   if(status == TS_OK) {
     return 0;
@@ -200,7 +214,7 @@ static inline int ex_next_token(token_t* token, executor_t* ex) {
 
   /* Allocation failure */
   if(status == TS_E_NOMEM) {
-    ex_error(ex, EX_E_FATAL, "%s", OUT_OF_MEMORY_MESSAGE);
+    fail(ex, EX_E_FATAL, NULL, OUT_OF_MEMORY_MESSAGE);
     return -1;
   }
 
@@ -222,7 +236,7 @@ static inline int ex_next_token(token_t* token, executor_t* ex) {
       assert(0);
   }
 
-  ex_error(ex, EX_E_RECOVERABLE, "%s", message);
+  fail(ex, EX_E_RECOVERABLE, token, message);
   return -1;
 }
 
@@ -263,8 +277,8 @@ const command_t* find_command(executor_t* ex, const token_t* token) {
 
   /* Swallow any allocation errors from token2str, since we're already
    * dealing with one failure case */
-  ex_error(
-    ex, EX_E_RECOVERABLE,
+  fail(
+    ex, EX_E_RECOVERABLE, token,
     "No such command %s; try `help` to list available commands",
     ((str == NULL) ? "" : str)
   );
@@ -274,7 +288,7 @@ const command_t* find_command(executor_t* ex, const token_t* token) {
   return NULL;
 }
 
-FILE* ex_fopen(executor_t* ex, const token_t* token, bool in, bool binary) {
+static inline FILE* ex_fopen(executor_t* ex, const token_t* token, bool in, bool binary) {
   const char* mode;
 
   if(binary) {
@@ -290,7 +304,7 @@ FILE* ex_fopen(executor_t* ex, const token_t* token, bool in, bool binary) {
     if(in) {
       /* We can only consume stdin once */
       if(ex->stdin_consumed) {
-        ex_error(ex, EX_E_RECOVERABLE, "standard input has already been consumed");
+        fail(ex, EX_E_RECOVERABLE, token, "standard input has already been consumed");
         return NULL;
       }
 
@@ -301,7 +315,7 @@ FILE* ex_fopen(executor_t* ex, const token_t* token, bool in, bool binary) {
 
     /* FIXME: freopen doesn't necessarily set errno */
     if(file == NULL) {
-      ex_error(ex, EX_E_FATAL, "%s", strerror(errno));
+      fail(ex, EX_E_FATAL, token, "%s", strerror(errno));
       return NULL;
     }
 
@@ -312,7 +326,7 @@ FILE* ex_fopen(executor_t* ex, const token_t* token, bool in, bool binary) {
 
   for(size_t i = 0; i < token->length; i ++) {
     if(token->buffer[i] == 0) {
-      ex_error(ex, EX_E_RECOVERABLE, "null byte in filename");
+      fail(ex, EX_E_RECOVERABLE, token, "null byte in filename");
       return NULL;
     }
   }
@@ -320,7 +334,7 @@ FILE* ex_fopen(executor_t* ex, const token_t* token, bool in, bool binary) {
   char* filename = (char*)malloc(token->length + 1);
 
   if(filename == NULL) {
-    ex_error(ex, EX_E_FATAL, OUT_OF_MEMORY_MESSAGE);
+    fail(ex, EX_E_FATAL, token, OUT_OF_MEMORY_MESSAGE);
     return NULL;
   }
 
@@ -333,14 +347,14 @@ FILE* ex_fopen(executor_t* ex, const token_t* token, bool in, bool binary) {
 
   /* FIXME: fopen doesn't necessarily set errno */
   if(file == NULL) {
-    ex_error(ex, EX_E_FATAL, "%s", strerror(errno));
+    fail(ex, EX_E_FATAL, token, "%s", strerror(errno));
     return NULL;
   }
 
   return file;
 }
 
-void ex_fclose(FILE* file) {
+static inline void ex_fclose(FILE* file) {
   if(file == stdin || file == stdout) {
     return;
   }
@@ -387,12 +401,12 @@ static void exec_create(executor_t* ex, size_t argc, const token_t* argv) {
   /* Parse parameters */
 
   if(token2size(&n_hash_functions, &argv[0]) == -1 || n_hash_functions == 0) {
-    ex_error(ex, EX_E_RECOVERABLE, "n_hash_functions must be a positive integer");
+    fail(ex, EX_E_RECOVERABLE, &argv[0], "n_hash_functions must be a positive integer");
     return;
   }
 
   if(token2size(&log2_bits, &argv[1]) == -1 || n_hash_functions == 0) {
-    ex_error(ex, EX_E_RECOVERABLE, "log2_bits must be a positive integer");
+    fail(ex, EX_E_RECOVERABLE, &argv[1], "log2_bits must be a positive integer");
     return;
   }
 
@@ -405,8 +419,8 @@ static void exec_create(executor_t* ex, size_t argc, const token_t* argv) {
     return;
   }
 
-  ex_error(
-    ex, ((status == HIBP_E_NOMEM) ? EX_E_FATAL : EX_E_RECOVERABLE),
+  fail(
+    ex, ((status == HIBP_E_NOMEM) ? EX_E_FATAL : EX_E_RECOVERABLE), &argv[1],
     hibp_strerror(status)
   );
 }
@@ -445,7 +459,7 @@ static void exec_load(executor_t* ex, size_t argc, const token_t* argv) {
   assert(status == HIBP_E_IO);
 
   /* FIXME: errno isn't necessarily set by fwrite and friends */
-  ex_error(ex, EX_E_RECOVERABLE, "%s", strerror(errno));
+  fail(ex, EX_E_RECOVERABLE, &argv[0], "%s", strerror(errno));
 }
 
 static void exec_save(executor_t* ex, size_t argc, const token_t* argv) {
@@ -469,17 +483,22 @@ static void exec_save(executor_t* ex, size_t argc, const token_t* argv) {
   assert(status == HIBP_E_IO);
 
   /* FIXME: errno isn't necessarily set by fwrite and friends */
-  ex_error(ex, EX_E_RECOVERABLE, "%s", strerror(errno));
+  fail(ex, EX_E_RECOVERABLE, &argv[0], "%s", strerror(errno));
 }
 
 static void exec_unload(executor_t* ex, size_t argc, const token_t* argv) {
-  (void)ex;
+  assert(ex->filter_initialized);
+  assert(argc == 0);
   (void)argc;
   (void)argv;
+
+  hibp_bf_destroy(&ex->filter);
+  ex->filter_initialized = false;
 }
 
 static void exec_insert(executor_t* ex, size_t argc, const token_t* argv) {
   assert(ex->filter_initialized);
+  assert(argc > 0);
 
   for(size_t i = 0; i < argc; i ++) {
     const token_t* token = &argv[i];
@@ -488,13 +507,25 @@ static void exec_insert(executor_t* ex, size_t argc, const token_t* argv) {
 }
 
 static void exec_insert_sha(executor_t* ex, size_t argc, const token_t* argv) {
-  (void)ex;
-  (void)argc;
-  (void)argv;
+  assert(ex->filter_initialized);
+  assert(argc > 0);
+
+  for(size_t i = 0; i < argc; i ++) {
+    const token_t* token = &argv[i];
+
+    hibp_byte_t sha[SHA1_BYTES];
+
+    if(token2sha(sha, token) == -1) {
+      fail(ex, EX_E_RECOVERABLE, token, BAD_SHA_MESSAGE);
+    }
+
+    hibp_bf_insert_sha1(&ex->filter, sha);
+  }
 }
 
 static void exec_query(executor_t* ex, size_t argc, const token_t* argv) {
   assert(ex->filter_initialized);
+  assert(argc > 0);
 
   for(size_t i = 0; i < argc; i ++) {
     const token_t* token = &argv[i];
@@ -503,7 +534,7 @@ static void exec_query(executor_t* ex, size_t argc, const token_t* argv) {
     char* str = token2str(token);
 
     if(str == NULL) {
-      ex_error(ex, EX_E_FATAL, OUT_OF_MEMORY_MESSAGE);
+      fail(ex, EX_E_FATAL, NULL, OUT_OF_MEMORY_MESSAGE);
       return;
     }
 
@@ -514,15 +545,54 @@ static void exec_query(executor_t* ex, size_t argc, const token_t* argv) {
 }
 
 static void exec_query_sha(executor_t* ex, size_t argc, const token_t* argv) {
-  (void)ex;
-  (void)argc;
-  (void)argv;
+  assert(ex->filter_initialized);
+  assert(argc > 0);
+
+  for(size_t i = 0; i < argc; i ++) {
+    const token_t* token = &argv[i];
+
+    hibp_byte_t sha[SHA1_BYTES];
+
+    if(token2sha(sha, token) == -1) {
+      fail(ex, EX_E_RECOVERABLE, token, BAD_SHA_MESSAGE);
+      return;
+    }
+
+    const bool found = hibp_bf_query_sha1(&ex->filter, sha);
+
+    /* No need for token2str shenanigans, because we know for sure that it's
+     * printable verbatim */
+    fwrite(token->buffer, 1, token->length, stdout);
+    printf("  %s\n", (found ? "true" : "false"));
+  }
 }
 
 static void exec_falsepos(executor_t* ex, size_t argc, const token_t* argv) {
-  (void)ex;
-  (void)argc;
-  (void)argv;
+  assert(ex->filter_initialized);
+  assert(argc == 0 || argc == 1);
+
+  size_t trials = 10000;
+
+  if(argc == 1) {
+    if(token2size(&trials, &argv[0]) == -1) {
+      fail(ex, EX_E_RECOVERABLE, &argv[0], "trials must be a positive integer");
+      return;
+    }
+  }
+
+  size_t positive = 0;
+
+  for(size_t i = 0; i < trials; i ++) {
+    hibp_byte_t value[100];
+
+    for(size_t j = 0; j < sizeof(value); j ++) {
+      value[j] = rand() % 256;
+    }
+
+    positive += hibp_bf_query(&ex->filter, sizeof(value), value);
+  }
+
+  printf("%lf\n", (double)positive / trials);
 }
 
 
@@ -620,7 +690,7 @@ void executor_exec_one(executor_t* ex) {
         token_t* next = (token_t*)realloc(argv, sizeof(token_t) * capacity);
 
         if(next == NULL) {
-          ex_error(ex, EX_E_FATAL, OUT_OF_MEMORY_MESSAGE);
+          fail(ex, EX_E_FATAL, NULL, OUT_OF_MEMORY_MESSAGE);
           free(argv);
           return;
         }
@@ -630,8 +700,6 @@ void executor_exec_one(executor_t* ex) {
 
       assert(argc < capacity);
       assert(argv != NULL);
-
-      token_new(&argv[argc]);
 
       if(ex_next_token(&argv[argc ++], ex) == -1) {
         free(argv);
@@ -658,8 +726,10 @@ void executor_exec_one(executor_t* ex) {
   }
 
   if(nullary && command->min_arity > 0) {
-    ex_error(
-      ex, EX_E_RECOVERABLE,
+    fail(
+      ex,
+      EX_E_RECOVERABLE,
+      &command_name,
       "%s takes %s %lu argument%s",
       command->name,
       (command->variadic ? "at least" : "exactly"),
@@ -671,8 +741,8 @@ void executor_exec_one(executor_t* ex) {
   }
 
   if(command->filter_required && !ex->filter_initialized) {
-    ex_error(
-      ex, EX_E_RECOVERABLE,
+    fail(
+      ex, EX_E_RECOVERABLE, &command_name,
       "%s requires a loaded Bloom filter; try `help` to learn how to create or load a filter",
       command->name
     );
@@ -681,8 +751,8 @@ void executor_exec_one(executor_t* ex) {
   }
 
   if(command->filter_unrequired && ex->filter_initialized) {
-    ex_error(
-      ex, EX_E_RECOVERABLE,
+    fail(
+      ex, EX_E_RECOVERABLE, &command_name,
       "%s would overwrite the already-loaded filter; run `save` and `unload` first",
       command->name
     );
