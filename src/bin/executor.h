@@ -15,12 +15,6 @@ typedef enum {
 typedef struct {
   stream_t* stream;
 
-  /* The scripting language is simple to the point that we never actually need to
-   * hold more than a single token in memory when parsing and executing a script -
-   * hence we can use a single token_t object, reusing its allocated storage with
-   * each read */
-  token_t token;
-
   /* Is stdin still available to be slurped by some command? */
   bool stdin_consumed;
 
