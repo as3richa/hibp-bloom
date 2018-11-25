@@ -176,6 +176,19 @@ static const command_t commands[] = {
   },
 
   {
+    "query-file",
+    "<filename> [<format>]",
+    (
+      "Query for the presence of a sequence of strings from the given file according to\n"
+      "the specified format. format is either \"strings\" (default, whitespace-delimited\n"
+      "strings), \"lines\" (full lines including leading/trailing whitespace), or \"shas\"\n"
+      "(space- or comma-separated SHA1 hashes)."
+    ),
+    1, true, true, false,
+    NULL
+  },
+
+  {
     "falsepos",
     "[<trials>]",
     (
