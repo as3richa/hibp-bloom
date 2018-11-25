@@ -36,7 +36,7 @@ typedef struct {
   const char* description;
 
   size_t min_arity;
-  bool variadic;
+  size_t max_arity;
 
   /* Fail if no filter loaded */
   bool filter_required;
@@ -69,7 +69,8 @@ static const command_t commands[] = {
     "status",
     "",
     "Show information about the currently-loaded Bloom filter",
-    0, false, true, false,
+    0, 0,
+    true, false,
     exec_status
   },
 
@@ -82,7 +83,8 @@ static const command_t commands[] = {
       "knowledge of the literature; to initialize a filter with sane defaults, use\n"
       "create-auto."
     ),
-    2, false, false, true,
+    2, 2,
+    false, true,
     exec_create
   },
 
@@ -99,7 +101,8 @@ static const command_t commands[] = {
       "10gb, 0.5k, etc.). After creating a filter, try falsepos to empirically check\n"
       "the false positive rate."
     ),
-    2, false, false, true,
+    2, 2,
+    false, true,
     exec_create_auto
   },
 
@@ -107,7 +110,8 @@ static const command_t commands[] = {
     "load",
     "<filename>",
     "Load a previously-saved Bloom filter from disk.",
-    1, false, false, true,
+    1, 1,
+    false, true,
     exec_load
   },
 
@@ -115,7 +119,8 @@ static const command_t commands[] = {
     "save",
     "<filename>",
     "Save the currently-loaded Bloom filter to disk.",
-    1, false, true, false,
+    1, 1,
+    true, false,
     exec_save
   },
 
@@ -123,7 +128,8 @@ static const command_t commands[] = {
     "unload",
     "",
     "Unload the currently-loaded Bloom filter without persisting it to disk.",
-    0, false, true, false,
+    0, 0,
+    true, false,
     exec_unload
   },
 
@@ -131,7 +137,8 @@ static const command_t commands[] = {
     "insert",
     "<string> [... <string>]",
     "Insert one or several string(s) into the Bloom filter.",
-    1, true, true, false,
+    1, SIZE_MAX,
+    true, false,
     exec_insert
   },
 
@@ -139,7 +146,8 @@ static const command_t commands[] = {
     "insert-sha",
     "<hash> [... <hash>]",
     "Insert one or several string(s), encoded as SHA1 hashes, into the Bloom filter.",
-    1, true, true, false,
+    1, SIZE_MAX,
+    true, false,
     exec_insert_sha
   },
 
@@ -152,7 +160,8 @@ static const command_t commands[] = {
       "\"lines\" (full lines including leading/trailing whitespace), or \"shas\" (space-\n"
       "or comma-separated SHA1 hashes)."
     ),
-    1, true, true, false,
+    1, 2,
+    true, false,
     NULL
   },
 
@@ -160,7 +169,8 @@ static const command_t commands[] = {
     "query",
     "<string> [... <string>]",
     "Query for the presence of one or several string(s) in the Bloom filter.",
-    1, true, true, false,
+    1, SIZE_MAX,
+    true, false,
     exec_query
   },
 
@@ -171,7 +181,8 @@ static const command_t commands[] = {
       "Query for the presence of one or several string(s), encoded as SHA1 hashes,\n"
       "in the Bloom filter."
     ),
-    1, true, true, false,
+    1, SIZE_MAX,
+    true, false,
     exec_query_sha
   },
 
@@ -184,7 +195,8 @@ static const command_t commands[] = {
       "strings), \"lines\" (full lines including leading/trailing whitespace), or \"shas\"\n"
       "(space- or comma-separated SHA1 hashes)."
     ),
-    1, true, true, false,
+    1, 1,
+    true, false,
     NULL
   },
 
@@ -195,7 +207,8 @@ static const command_t commands[] = {
       "Empirically test the false positive rate of the currently-loaded Bloom\n"
       "filter by repeated random trials."
     ),
-    0, true, true, false,
+    0, 1,
+    true, false,
     exec_falsepos
   },
 
@@ -203,7 +216,8 @@ static const command_t commands[] = {
     "sha",
     "<string>",
     "Compute the SHA1 hash of the given string.",
-    1, false, false, false,
+    1, 1,
+    false, false,
     exec_sha
   },
 
@@ -211,7 +225,8 @@ static const command_t commands[] = {
     "help",
     "[<command>]",
     "List available commands, or show detailed documentation for one command.",
-    0, true, false, false,
+    0, 1,
+    false, false,
     exec_help
   }
 };
@@ -828,17 +843,38 @@ void executor_exec_one(executor_t* ex) {
     return;
   }
 
-  if(nullary && command->min_arity > 0) {
+  if(argc < command->min_arity) {
+    const bool variadic = (command->min_arity < command->max_arity);
+
     fail(
       ex,
       EX_E_RECOVERABLE,
       &command_name,
       "%s takes %s %lu argument%s",
       command->name,
-      (command->variadic ? "at least" : "exactly"),
+      (variadic ? "at least" : "exactly"),
       (unsigned long)command->min_arity,
       ((command->min_arity == 1) ? "" : "s")
     );
+
+    free(argv);
+    return;
+  }
+
+  if(argc > command->max_arity) {
+    const bool variadic = (command->min_arity < command->max_arity);
+
+    fail(
+      ex,
+      EX_E_RECOVERABLE,
+      &command_name,
+      "%s takes %s %lu argument%s",
+      command->name,
+      (variadic ? "at most" : "exactly"),
+      (unsigned long)command->max_arity,
+      ((command->min_arity == 1) ? "" : "s")
+    );
+
     free(argv);
     return;
   }
