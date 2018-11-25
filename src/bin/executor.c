@@ -45,22 +45,22 @@ typedef struct {
   bool filter_unrequired;
 
   /* Callback */
-  void (*exec)(executor_t* ex, size_t argc, const token_t* argv);
+  void (*exec)(executor_t* ex, size_t arity, const token_t* args);
 } command_t;
 
-static void exec_status(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_create(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_create_auto(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_load(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_save(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_unload(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_insert(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_insert_sha(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_query(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_query_sha(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_falsepos(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_sha(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_help(executor_t* ex, size_t argc, const token_t* argv);
+static void exec_status(executor_t* ex, size_t arity, const token_t* args);
+static void exec_create(executor_t* ex, size_t arity, const token_t* args);
+static void exec_create_auto(executor_t* ex, size_t arity, const token_t* args);
+static void exec_load(executor_t* ex, size_t arity, const token_t* args);
+static void exec_save(executor_t* ex, size_t arity, const token_t* args);
+static void exec_unload(executor_t* ex, size_t arity, const token_t* args);
+static void exec_insert(executor_t* ex, size_t arity, const token_t* args);
+static void exec_insert_sha(executor_t* ex, size_t arity, const token_t* args);
+static void exec_query(executor_t* ex, size_t arity, const token_t* args);
+static void exec_query_sha(executor_t* ex, size_t arity, const token_t* args);
+static void exec_falsepos(executor_t* ex, size_t arity, const token_t* args);
+static void exec_sha(executor_t* ex, size_t arity, const token_t* args);
+static void exec_help(executor_t* ex, size_t arity, const token_t* args);
 
 #define N_COMMANDS (sizeof(commands) / sizeof(command_t))
 
@@ -432,11 +432,11 @@ static inline void ex_fclose(FILE* file) {
  * Command callbacks
  * ================================================================ */
 
-static void exec_status(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_status(executor_t* ex, size_t arity, const token_t* args) {
   assert(ex->filter_initialized);
-  assert(argc == 0);
-  (void)argc;
-  (void)argv;
+  assert(arity == 0);
+  (void)arity;
+  (void)args;
 
   const char* format =
     "n_hash_functions:  %u\n"
@@ -456,23 +456,23 @@ static void exec_status(executor_t* ex, size_t argc, const token_t* argv) {
   );
 }
 
-static void exec_create(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_create(executor_t* ex, size_t arity, const token_t* args) {
   assert(!ex->filter_initialized);
-  assert(argc == 2);
-  (void)argc;
+  assert(arity == 2);
+  (void)arity;
 
   size_t n_hash_functions;
   size_t log2_bits;
 
   /* Parse parameters */
 
-  if(token2size(&n_hash_functions, &argv[0]) == -1 || n_hash_functions == 0) {
-    fail(ex, EX_E_RECOVERABLE, &argv[0], "n_hash_functions must be a positive integer");
+  if(token2size(&n_hash_functions, &args[0]) == -1 || n_hash_functions == 0) {
+    fail(ex, EX_E_RECOVERABLE, &args[0], "n_hash_functions must be a positive integer");
     return;
   }
 
-  if(token2size(&log2_bits, &argv[1]) == -1 || n_hash_functions == 0) {
-    fail(ex, EX_E_RECOVERABLE, &argv[1], "log2_bits must be a positive integer");
+  if(token2size(&log2_bits, &args[1]) == -1 || n_hash_functions == 0) {
+    fail(ex, EX_E_RECOVERABLE, &args[1], "log2_bits must be a positive integer");
     return;
   }
 
@@ -491,9 +491,9 @@ static void exec_create(executor_t* ex, size_t argc, const token_t* argv) {
   );
 }
 
-static void exec_create_auto(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_create_auto(executor_t* ex, size_t arity, const token_t* args) {
   assert(!ex->filter_initialized);
-  assert(argc == 2 || argc == 3);
+  assert(arity == 2 || arity == 3);
 
   size_t count;
   double rate;
@@ -501,18 +501,18 @@ static void exec_create_auto(executor_t* ex, size_t argc, const token_t* argv) {
 
   /* Parse parameters */
 
-  if(token2size(&count, &argv[0]) == -1) {
-    fail(ex, EX_E_RECOVERABLE, &argv[0], "count must be a non-negative integer");
+  if(token2size(&count, &args[0]) == -1) {
+    fail(ex, EX_E_RECOVERABLE, &args[0], "count must be a non-negative integer");
     return;
   }
 
-  if(token2double(&rate, &argv[1]) == -1) {
-    fail(ex, EX_E_RECOVERABLE, &argv[1], "rate must be a non-negative real number");
+  if(token2double(&rate, &args[1]) == -1) {
+    fail(ex, EX_E_RECOVERABLE, &args[1], "rate must be a non-negative real number");
   }
 
-  if(argc == 3) {
-    if(token2memsize(&maxmem, &argv[2]) == -1) {
-      fail(ex, EX_E_RECOVERABLE, &argv[2], "maxmem must be a quantity of memory");
+  if(arity == 3) {
+    if(token2memsize(&maxmem, &args[2]) == -1) {
+      fail(ex, EX_E_RECOVERABLE, &args[2], "maxmem must be a quantity of memory");
       return;
     }
   } else {
@@ -551,12 +551,12 @@ static void exec_create_auto(executor_t* ex, size_t argc, const token_t* argv) {
   );
 }
 
-static void exec_load(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_load(executor_t* ex, size_t arity, const token_t* args) {
   assert(!ex->filter_initialized);
-  assert(argc == 1);
-  (void)argc;
+  assert(arity == 1);
+  (void)arity;
 
-  FILE* file = ex_fopen(ex, &argv[0], true, true);
+  FILE* file = ex_fopen(ex, &args[0], true, true);
 
   if(file == NULL) {
     return;
@@ -574,15 +574,15 @@ static void exec_load(executor_t* ex, size_t argc, const token_t* argv) {
   assert(status == HIBP_E_IO);
 
   /* FIXME: errno isn't necessarily set by fwrite and friends */
-  fail(ex, EX_E_RECOVERABLE, &argv[0], "%s", strerror(errno));
+  fail(ex, EX_E_RECOVERABLE, &args[0], "%s", strerror(errno));
 }
 
-static void exec_save(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_save(executor_t* ex, size_t arity, const token_t* args) {
   assert(ex->filter_initialized);
-  assert(argc == 1);
-  (void)argc;
+  assert(arity == 1);
+  (void)arity;
 
-  FILE* file = ex_fopen(ex, &argv[0], false, true);
+  FILE* file = ex_fopen(ex, &args[0], false, true);
 
   if(file == NULL) {
     return;
@@ -599,35 +599,35 @@ static void exec_save(executor_t* ex, size_t argc, const token_t* argv) {
   assert(status == HIBP_E_IO);
 
   /* FIXME: errno isn't necessarily set by fwrite and friends */
-  fail(ex, EX_E_RECOVERABLE, &argv[0], "%s", strerror(errno));
+  fail(ex, EX_E_RECOVERABLE, &args[0], "%s", strerror(errno));
 }
 
-static void exec_unload(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_unload(executor_t* ex, size_t arity, const token_t* args) {
   assert(ex->filter_initialized);
-  assert(argc == 0);
-  (void)argc;
-  (void)argv;
+  assert(arity == 0);
+  (void)arity;
+  (void)args;
 
   hibp_bf_destroy(&ex->filter);
   ex->filter_initialized = false;
 }
 
-static void exec_insert(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_insert(executor_t* ex, size_t arity, const token_t* args) {
   assert(ex->filter_initialized);
-  assert(argc > 0);
+  assert(arity > 0);
 
-  for(size_t i = 0; i < argc; i ++) {
-    const token_t* token = &argv[i];
+  for(size_t i = 0; i < arity; i ++) {
+    const token_t* token = &args[i];
     hibp_bf_insert(&ex->filter, token->length, (hibp_byte_t*)token->buffer);
   }
 }
 
-static void exec_insert_sha(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_insert_sha(executor_t* ex, size_t arity, const token_t* args) {
   assert(ex->filter_initialized);
-  assert(argc > 0);
+  assert(arity > 0);
 
-  for(size_t i = 0; i < argc; i ++) {
-    const token_t* token = &argv[i];
+  for(size_t i = 0; i < arity; i ++) {
+    const token_t* token = &args[i];
 
     hibp_byte_t sha[SHA1_BYTES];
 
@@ -639,12 +639,12 @@ static void exec_insert_sha(executor_t* ex, size_t argc, const token_t* argv) {
   }
 }
 
-static void exec_query(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_query(executor_t* ex, size_t arity, const token_t* args) {
   assert(ex->filter_initialized);
-  assert(argc > 0);
+  assert(arity > 0);
 
-  for(size_t i = 0; i < argc; i ++) {
-    const token_t* token = &argv[i];
+  for(size_t i = 0; i < arity; i ++) {
+    const token_t* token = &args[i];
     const bool found = hibp_bf_query(&ex->filter, token->length, (hibp_byte_t*)token->buffer);
 
     char* str = token2str(token);
@@ -660,12 +660,12 @@ static void exec_query(executor_t* ex, size_t argc, const token_t* argv) {
   }
 }
 
-static void exec_query_sha(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_query_sha(executor_t* ex, size_t arity, const token_t* args) {
   assert(ex->filter_initialized);
-  assert(argc > 0);
+  assert(arity > 0);
 
-  for(size_t i = 0; i < argc; i ++) {
-    const token_t* token = &argv[i];
+  for(size_t i = 0; i < arity; i ++) {
+    const token_t* token = &args[i];
 
     hibp_byte_t sha[SHA1_BYTES];
 
@@ -683,15 +683,15 @@ static void exec_query_sha(executor_t* ex, size_t argc, const token_t* argv) {
   }
 }
 
-static void exec_falsepos(executor_t* ex, size_t argc, const token_t* argv) {
+static void exec_falsepos(executor_t* ex, size_t arity, const token_t* args) {
   assert(ex->filter_initialized);
-  assert(argc == 0 || argc == 1);
+  assert(arity == 0 || arity == 1);
 
   size_t trials = 10000;
 
-  if(argc == 1) {
-    if(token2size(&trials, &argv[0]) == -1) {
-      fail(ex, EX_E_RECOVERABLE, &argv[0], "trials must be a positive integer");
+  if(arity == 1) {
+    if(token2size(&trials, &args[0]) == -1) {
+      fail(ex, EX_E_RECOVERABLE, &args[0], "trials must be a positive integer");
       return;
     }
   }
@@ -712,12 +712,12 @@ static void exec_falsepos(executor_t* ex, size_t argc, const token_t* argv) {
 }
 
 
-static void exec_sha(executor_t* ex, size_t argc, const token_t* argv) {
-  assert(argc == 1);
+static void exec_sha(executor_t* ex, size_t arity, const token_t* args) {
+  assert(arity == 1);
   (void)ex;
-  (void)argc;
+  (void)arity;
 
-  const token_t* token = &argv[0];
+  const token_t* token = &args[0];
 
   unsigned char sha[SHA1_BYTES];
   SHA1((unsigned char*)token->buffer, token->length, sha);
@@ -730,10 +730,10 @@ static void exec_sha(executor_t* ex, size_t argc, const token_t* argv) {
   putchar('\n');
 }
 
-static void exec_help(executor_t* ex, size_t argc, const token_t* argv) {
-  assert(argc == 0 || argc == 1);
+static void exec_help(executor_t* ex, size_t arity, const token_t* args) {
+  assert(arity == 0 || arity == 1);
 
-  if(argc == 0) {
+  if(arity == 0) {
     /* Nullary version; list all available commands */
 
     puts("\nAvailable commands:");
@@ -751,7 +751,7 @@ static void exec_help(executor_t* ex, size_t argc, const token_t* argv) {
 
   /* Unary version; give help for one particular command */
 
-  const command_t* command = find_command(ex, &argv[0]);
+  const command_t* command = find_command(ex, &args[0]);
 
   if(command == NULL) {
     return;
@@ -788,8 +788,8 @@ void executor_exec_one(executor_t* ex) {
 
   token_t command_name;
 
-  size_t argc = 0;
-  token_t* argv = NULL;
+  size_t arity = 0;
+  token_t* args = NULL;
 
   if(ex_next_token(&command_name, ex) == -1) {
     return;
@@ -801,37 +801,37 @@ void executor_exec_one(executor_t* ex) {
     size_t capacity = 0;
 
     do {
-      assert(argc <= capacity);
+      assert(arity <= capacity);
 
-      if(argc == capacity) {
+      if(arity == capacity) {
         capacity = ((capacity == 0) ? 8 : (2 * capacity));
-        token_t* next = (token_t*)realloc(argv, sizeof(token_t) * capacity);
+        token_t* next = (token_t*)realloc(args, sizeof(token_t) * capacity);
 
         if(next == NULL) {
           fail(ex, EX_E_FATAL, NULL, OUT_OF_MEMORY_MESSAGE);
-          free(argv);
+          free(args);
           return;
         }
 
-        argv = next;
+        args = next;
       }
 
-      assert(argc < capacity);
-      assert(argv != NULL);
+      assert(arity < capacity);
+      assert(args != NULL);
 
-      if(ex_next_token(&argv[argc ++], ex) == -1) {
-        free(argv);
+      if(ex_next_token(&args[arity ++], ex) == -1) {
+        free(args);
         return;
       }
-    } while(!argv[argc - 1].last_of_command);
+    } while(!args[arity - 1].last_of_command);
 
-    /* Shrink argv, just for hygiene */
-    if(argc < capacity) {
-      token_t* next = realloc(argv, sizeof(token_t) * capacity);
+    /* Shrink args, just for hygiene */
+    if(arity < capacity) {
+      token_t* next = realloc(args, sizeof(token_t) * capacity);
 
       /* Swallow any error since we can keep chugging along */
       if(next != NULL) {
-        argv = next;
+        args = next;
       }
     }
   }
@@ -839,11 +839,11 @@ void executor_exec_one(executor_t* ex) {
   const command_t* command = find_command(ex, &command_name);
 
   if(command == NULL) {
-    free(argv);
+    free(args);
     return;
   }
 
-  if(argc < command->min_arity) {
+  if(arity < command->min_arity) {
     const bool variadic = (command->min_arity < command->max_arity);
 
     fail(
@@ -857,11 +857,11 @@ void executor_exec_one(executor_t* ex) {
       ((command->min_arity == 1) ? "" : "s")
     );
 
-    free(argv);
+    free(args);
     return;
   }
 
-  if(argc > command->max_arity) {
+  if(arity > command->max_arity) {
     const bool variadic = (command->min_arity < command->max_arity);
 
     fail(
@@ -875,7 +875,7 @@ void executor_exec_one(executor_t* ex) {
       ((command->min_arity == 1) ? "" : "s")
     );
 
-    free(argv);
+    free(args);
     return;
   }
 
@@ -885,7 +885,7 @@ void executor_exec_one(executor_t* ex) {
       "%s requires a loaded Bloom filter; try `help` to learn how to create or load a filter",
       command->name
     );
-    free(argv);
+    free(args);
     return;
   }
 
@@ -895,13 +895,13 @@ void executor_exec_one(executor_t* ex) {
       "%s would overwrite the already-loaded filter; run `save` and `unload` first",
       command->name
     );
-    free(argv);
+    free(args);
     return;
   }
 
-  command->exec(ex, argc, argv);
+  command->exec(ex, arity, args);
 
-  free(argv);
+  free(args);
 }
 
 void executor_drain_line(executor_t* ex) {
