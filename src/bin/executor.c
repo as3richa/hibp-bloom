@@ -8,6 +8,19 @@
 
 #include "executor.h"
 
+static const char* help_footer =
+  "Try `help <command>` to view detailed documentation for a command.\n\n"
+  "Commands are delimited by newlines or semicolons; individual tokens (i.e.\n"
+  "command names or parameters) are delimited by whitespace. To pass a parameter\n"
+  "containing whitespace or a semicolon, use single or double quotes. Quoted tokens\n"
+  "support a limited set of escape sequences: \"\\n\", \"\\xhh\" (for any hexadecimal\n"
+  "digits h), \"\\\"\", '\\''.\n\n"
+  "Commands accepting a filename parameter can be directed to read from standard\n"
+  "input or write to standard output by passing \"-\" (the hyphen character) as the\n"
+  "filename. Because reading from standard input exhausts the stream, standard\n"
+  "input can only be used as a parameter once per script run, and not at all if the\n"
+  "session is interactive or if the script is given on the standard input.";
+
 /* ================================================================
  * Command dispatch table
  * ================================================================ */
@@ -64,7 +77,10 @@ static const command_t commands[] = {
   {
     "create",
     "<n_hash_functions> <log2_bits>",
-    "Intialize a Bloom filter with n_hash_functions randomly-chosen hash functions and a bit vector of size (2**log2_bits).",
+    (
+      "Intialize a Bloom filter with n_hash_functions randomly-chosen hash functions\n"
+      "and a bit vector of size (2**log2_bits)."
+    ),
     2, false, false, true,
     exec_create
   },
@@ -72,7 +88,10 @@ static const command_t commands[] = {
   {
     "create-maxmem",
     "<count> <max_memory>",
-    "Intialize a Bloom filter with an approximate memory limit, given the expected cardinality of the set.",
+    (
+      "Intialize a Bloom filter with an approximate memory limit, given the expected\n"
+      "cardinality of the set."
+    ),
     2, false, false, true,
     exec_create_maxmem
   },
@@ -80,7 +99,10 @@ static const command_t commands[] = {
   {
     "create-falsepos",
     "<count> <rate>",
-    "Initialize a Bloom filter with an approximate goal false positive rate, given the expected cardinality of the set.",
+    (
+      "Initialize a Bloom filter with an approximate goal false positive rate, given\n"
+      "the expected cardinality of the set."
+    ),
     2, false, false, true,
     exec_create_falsepos
   },
@@ -126,6 +148,19 @@ static const command_t commands[] = {
   },
 
   {
+    "insert-file",
+    "<filename> [<format>]",
+    (
+      "Insert a sequence of strings from the given file according to the specified\n"
+      "format. format is either \"strings\" (default, whitespace-delimited strings),\n"
+      "\"lines\" (full lines including leading/trailing whitespace), or \"shas\" (space-\n"
+      "or comma-separated SHA1 hashes)."
+    ),
+    1, true, true, false,
+    NULL
+  },
+
+  {
     "query",
     "<string> [... <string>]",
     "Query for the presence of one or several string(s) in the Bloom filter.",
@@ -136,7 +171,10 @@ static const command_t commands[] = {
   {
     "query-sha",
     "<hash> [... <hash>]",
-    "Query for the presence of one or several string(s), encoded as SHA1 hashes, in the Bloom filter.",
+    (
+      "Query for the presence of one or several string(s), encoded as SHA1 hashes,\n"
+      "in the Bloom filter."
+    ),
     1, true, true, false,
     exec_query_sha
   },
@@ -144,7 +182,10 @@ static const command_t commands[] = {
   {
     "falsepos",
     "[<trials>]",
-    "Empirically test the false positive rate of the currently-loaded Bloom filter by repeated random trials.",
+    (
+      "Empirically test the false positive rate of the currently-loaded Bloom\n"
+      "filter by repeated random trials."
+    ),
     0, true, true, false,
     exec_falsepos
   },
@@ -394,6 +435,7 @@ static void exec_status(executor_t* ex, size_t argc, const token_t* argv) {
 static void exec_create(executor_t* ex, size_t argc, const token_t* argv) {
   assert(!ex->filter_initialized);
   assert(argc == 2);
+  (void)argc;
 
   size_t n_hash_functions;
   size_t log2_bits;
@@ -429,17 +471,20 @@ static void exec_create_maxmem(executor_t* ex, size_t argc, const token_t* argv)
   (void)ex;
   (void)argc;
   (void)argv;
+  assert(0);
 }
 
 static void exec_create_falsepos(executor_t* ex, size_t argc, const token_t* argv) {
   (void)ex;
   (void)argc;
   (void)argv;
+  assert(0);
 }
 
 static void exec_load(executor_t* ex, size_t argc, const token_t* argv) {
   assert(!ex->filter_initialized);
   assert(argc == 1);
+  (void)argc;
 
   FILE* file = ex_fopen(ex, &argv[0], true, true);
 
@@ -465,6 +510,7 @@ static void exec_load(executor_t* ex, size_t argc, const token_t* argv) {
 static void exec_save(executor_t* ex, size_t argc, const token_t* argv) {
   assert(ex->filter_initialized);
   assert(argc == 1);
+  (void)argc;
 
   FILE* file = ex_fopen(ex, &argv[0], false, true);
 
@@ -620,13 +666,15 @@ static void exec_help(executor_t* ex, size_t argc, const token_t* argv) {
   if(argc == 0) {
     /* Nullary version; list all available commands */
 
-    puts("Available commands:");
+    puts("\nAvailable commands:");
 
     for(size_t i = 0; i < N_COMMANDS; i ++) {
-      printf("~ %s %s\n", commands[i].name, commands[i].usage);
+      printf("  %s %s\n", commands[i].name, commands[i].usage);
     }
 
-    puts("Try `help <command>` to view detailed documentation for a command");
+    putchar('\n');
+    puts(help_footer);
+    putchar('\n');
 
     return;
   }
@@ -640,7 +688,7 @@ static void exec_help(executor_t* ex, size_t argc, const token_t* argv) {
   }
 
   printf(
-    "\n  USAGE: %s %s\n  %s\n\n",
+    "\n  USAGE: %s %s\n\n%s\n\n",
     command->name, command->usage, command->description
   );
 }
