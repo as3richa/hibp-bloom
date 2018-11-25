@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <math.h>
 #include <assert.h>
 
 /* SIZE_MAX isn't available on every compiler */
@@ -58,7 +59,9 @@ int token_eq(const token_t* token, const char* str) {
 }
 
 int token2double(double* value, const token_t* token) {
-  assert(token->length > 0);
+  if(token->length == 0) {
+    return -1;
+  }
 
   size_t i;
 
@@ -90,7 +93,9 @@ int token2double(double* value, const token_t* token) {
 }
 
 int token2size(size_t* value, const token_t* token) {
-  assert(token->length > 0);
+  if(token->length == 0) {
+    return -1;
+  }
 
   *value = 0;
 
@@ -106,6 +111,113 @@ int token2size(size_t* value, const token_t* token) {
 
     *value = 10 * (*value) + (token->buffer[i] - '0');
   }
+
+  return 0;
+}
+
+int token2memsize(size_t* value, const token_t* token) {
+  if(token->length == 0) {
+    return -1;
+  }
+
+  /* Extract the longest prefix of token that looks like a number */
+
+  token_t numeric_part = *token;
+
+  numeric_part.length = 0;
+
+  while(numeric_part.length < token->length) {
+    const int c = numeric_part.buffer[numeric_part.length];
+
+    if(!isdigit(c) && c != '.') {
+      break;
+    }
+
+    numeric_part.length ++;
+  }
+
+  /* Parse it */
+
+  double magnitude;
+
+  if(token2double(&magnitude, &numeric_part) == -1) {
+    return -1;
+  }
+
+  /* The remainder of the token should be (case-insensitive) b, k, kb, m, mb, g, gb,
+   * or the empty string */
+
+  int multiplier_char;
+
+  switch(token->length - numeric_part.length) {
+    case 0:
+      /* No suffix - implicitly, bytes */
+      multiplier_char = 'b';
+      break;
+
+    case 1:
+      /* Suffix is e.g. b, K, G */
+      multiplier_char = token->buffer[token->length - 1];
+      break;
+
+    case 2:
+    {
+      /* Suffix is e.g. mb, Kb, GB */
+
+      const int b = token->buffer[token->length - 1];
+
+      if(b != 'b' && b != 'B') {
+        return -1;
+      }
+
+      multiplier_char = token->buffer[token->length - 2];
+
+      /* bb, BB, etc. aren't valid suffixes */
+      if(multiplier_char == 'b' || multiplier_char == 'B') {
+        return -1;
+      }
+
+      break;
+    }
+
+    default:
+      return -1;
+  }
+
+  size_t multiplier;
+
+  switch(multiplier_char) {
+    case 'b':
+    case 'B':
+      multiplier = 1;
+      break;
+
+    case 'k':
+    case 'K':
+      multiplier = 1024;
+      break;
+
+    case 'm':
+    case 'M':
+      multiplier = 1024 * 1024;
+      break;
+
+    case 'g':
+    case 'G':
+      multiplier = 1024 * 1024 * 1024;
+      break;
+
+    default:
+      return -1;
+  }
+
+  const double bytes = ceil(magnitude * multiplier);
+
+  if(bytes > SIZE_MAX) {
+    return -1;
+  }
+
+  (*value) = (size_t)bytes;
 
   return 0;
 }

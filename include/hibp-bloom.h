@@ -45,6 +45,9 @@ typedef struct {
 
 void hibp_bf_get_info(hibp_filter_info_t* info, const hibp_bloom_filter_t* bf);
 
+/* FIXME: ditto */
+size_t hibp_compute_total_size(size_t n_hash_functions, size_t log2_bits);
+
 /* ================================================================
  * Error codes
  * ================================================================ */

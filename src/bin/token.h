@@ -31,10 +31,20 @@ int token_pushc(token_t* token, int c);
 /* Equality comparison with a null-terminated string */
 int token_eq(const token_t* token, const char* str);
 
-/* These return -1 on parse failure. Unlike the standard library functions they don't
- * tolerate trailing characters not part of the value */
+/* Conversion functions: These return -1 on parse failure or overflow. Unlike the
+ * standard library functions they don't tolerate trailing characters not part of
+ * the value */
+
+/* Non-negative floating point numbers (no scientific notation) */
 int token2double(double* value, const token_t* token);
+
+/* size_t, i.e. non-negative integers */
 int token2size(size_t* value, const token_t* token);
+
+/* Value representing some memory size. "1000" is 1000 bytes, 10.5MB is 11010048 bytes */
+int token2memsize(size_t* value, const token_t* token);
+
+/* SHA1 hashes, i.e. 40 hexademical characters => 20 byte blob */
 int token2sha(hibp_byte_t* sha, const token_t* token);
 
 #endif

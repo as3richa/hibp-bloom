@@ -50,8 +50,7 @@ typedef struct {
 
 static void exec_status(executor_t* ex, size_t argc, const token_t* argv);
 static void exec_create(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_create_maxmem(executor_t* ex, size_t argc, const token_t* argv);
-static void exec_create_falsepos(executor_t* ex, size_t argc, const token_t* argv);
+static void exec_create_auto(executor_t* ex, size_t argc, const token_t* argv);
 static void exec_load(executor_t* ex, size_t argc, const token_t* argv);
 static void exec_save(executor_t* ex, size_t argc, const token_t* argv);
 static void exec_unload(executor_t* ex, size_t argc, const token_t* argv);
@@ -79,32 +78,29 @@ static const command_t commands[] = {
     "<n_hash_functions> <log2_bits>",
     (
       "Intialize a Bloom filter with n_hash_functions randomly-chosen hash functions\n"
-      "and a bit vector of size (2**log2_bits)."
+      "and a bit vector of size 2**log2_bits. Tuning these values requires prior\n"
+      "knowledge of the literature; to initialize a filter with sane defaults, use\n"
+      "create-auto."
     ),
     2, false, false, true,
     exec_create
   },
 
   {
-    "create-maxmem",
-    "<count> <max_memory>",
+    "create-auto",
+    "<count> <rate> [<max_memory>]",
     (
-      "Intialize a Bloom filter with an approximate memory limit, given the expected\n"
-      "cardinality of the set."
+      "Initialize a Bloom filter with an approximate goal false positive rate and an\n"
+      "optional maximum permissable memory consumption (default 100MB), given the\n"
+      "expected cardinality of the underlying set. If rate is not satisfiable within\n"
+      "the given memory limit, the best-performing parameters within the memory limit\n"
+      "shall be selected. max_memory can be given either as an integer number of\n"
+      "bytes, or as a real number followed by a suffix indicating the units (e.g. 10M\n"
+      "10gb, 0.5k, etc.). After creating a filter, try falsepos to empirically check\n"
+      "the false positive rate."
     ),
     2, false, false, true,
-    exec_create_maxmem
-  },
-
-  {
-    "create-falsepos",
-    "<count> <rate>",
-    (
-      "Initialize a Bloom filter with an approximate goal false positive rate, given\n"
-      "the expected cardinality of the set."
-    ),
-    2, false, false, true,
-    exec_create_falsepos
+    exec_create_auto
   },
 
   {
@@ -462,23 +458,69 @@ static void exec_create(executor_t* ex, size_t argc, const token_t* argv) {
   }
 
   fail(
-    ex, ((status == HIBP_E_NOMEM) ? EX_E_FATAL : EX_E_RECOVERABLE), &argv[1],
+    ex, ((status == HIBP_E_NOMEM) ? EX_E_FATAL : EX_E_RECOVERABLE), NULL,
     hibp_strerror(status)
   );
 }
 
-static void exec_create_maxmem(executor_t* ex, size_t argc, const token_t* argv) {
-  (void)ex;
-  (void)argc;
-  (void)argv;
-  assert(0);
-}
+static void exec_create_auto(executor_t* ex, size_t argc, const token_t* argv) {
+  assert(!ex->filter_initialized);
+  assert(argc == 2 || argc == 3);
 
-static void exec_create_falsepos(executor_t* ex, size_t argc, const token_t* argv) {
-  (void)ex;
-  (void)argc;
-  (void)argv;
-  assert(0);
+  size_t count;
+  double rate;
+  size_t maxmem;
+
+  /* Parse parameters */
+
+  if(token2size(&count, &argv[0]) == -1) {
+    fail(ex, EX_E_RECOVERABLE, &argv[0], "count must be a non-negative integer");
+    return;
+  }
+
+  if(token2double(&rate, &argv[1]) == -1) {
+    fail(ex, EX_E_RECOVERABLE, &argv[1], "rate must be a non-negative real number");
+  }
+
+  if(argc == 3) {
+    if(token2memsize(&maxmem, &argv[2]) == -1) {
+      fail(ex, EX_E_RECOVERABLE, &argv[2], "maxmem must be a quantity of memory");
+      return;
+    }
+  } else {
+    maxmem = 100 * 1024 * 1024;
+  }
+
+  size_t n_hash_functions;
+  size_t log2_bits;
+
+  /* Compute the parameters that would (with high probability) give a false positive
+   * rate of rate (assuming that the cardinality of the underlying set is count) */
+
+  hibp_compute_optimal_params(&n_hash_functions, &log2_bits, count, rate);
+
+  const size_t memory = hibp_compute_total_size(n_hash_functions, log2_bits);
+
+  /* If satisfying rate would eat too much memory, fall back on the best possible
+   * FP rate that fits within the limit */
+
+  if(memory > maxmem) {
+    hibp_compute_constrained_params(&n_hash_functions, &log2_bits, count, maxmem);
+  }
+
+  /* Initialize filter */
+
+  hibp_status_t status = hibp_bf_new(&ex->filter, n_hash_functions, log2_bits);
+
+  if(status == HIBP_OK) {
+    ex->filter_initialized = true;
+    return;
+  }
+
+  fail(
+    ex, ((status == HIBP_E_NOMEM) ? EX_E_FATAL : EX_E_RECOVERABLE), NULL,
+    hibp_strerror(status)
+  );
 }
 
 static void exec_load(executor_t* ex, size_t argc, const token_t* argv) {

@@ -274,6 +274,13 @@ void hibp_bf_get_info(hibp_filter_info_t* info, const hibp_bloom_filter_t* bf) {
   info->memory = sizeof(*bf) + buffer_size;
 }
 
+/* FIXME, part 2: electric boogaloo */
+size_t hibp_compute_total_size(size_t n_hash_functions, size_t log2_bits) {
+  size_t buffer_size;
+  compute_buffer_size(&buffer_size, n_hash_functions, log2_bits);
+  return buffer_size + sizeof(hibp_bloom_filter_t);
+}
+
 /* == Utilities == */
 
 void hibp_compute_optimal_params(size_t* n_hash_functions, size_t* log2_bits, size_t count, double fp) {
@@ -281,22 +288,27 @@ void hibp_compute_optimal_params(size_t* n_hash_functions, size_t* log2_bits, si
    * ... The optimal number of bits per element is -1.44 log_2 p
    * ... with the corresponding number of hash functions ... - log_2 p */
 
-  const double log_of_2 = log(2);
-  const double log_fp = log(fp) / log_of_2;
+  const double eps = 1e-8;
+  const double ln_of_2 = log(2);
+  const double log2_of_fp = log(fp + eps) / ln_of_2;
 
-  const double bits_per_elem = -1 * 1.44 * log_fp;
+  const double bits_per_elem = -1 * 1.44 * log2_of_fp;
   const double bits = bits_per_elem * count;
-  const double double_log2_bits = ceil(log(bits) / log_of_2 + 1e-6);
+  const double double_log2_bits = ceil(log(bits) / ln_of_2 + eps);
 
-  *log2_bits = (double_log2_bits > LOG2_BITS_MAX)
-    ? LOG2_BITS_MAX
-    : (size_t)double_log2_bits;
+  const double double_n_hash_functions = ceil(-1 * log2_of_fp);
 
-  const double double_n_hash_functions = ceil(-1 * log_fp);
+  if(double_n_hash_functions > N_HASH_FUNCTIONS_MAX) {
+    *n_hash_functions = N_HASH_FUNCTIONS_MAX;
+  } else {
+    *n_hash_functions = (size_t)double_n_hash_functions;
+  }
 
-  *n_hash_functions = (double_n_hash_functions > N_HASH_FUNCTIONS_MAX)
-     ? N_HASH_FUNCTIONS_MAX
-     : (size_t)double_n_hash_functions;
+  if(double_log2_bits > LOG2_BITS_MAX) {
+    *log2_bits = LOG2_BITS_MAX;
+  } else {
+    *log2_bits = (size_t)double_log2_bits;
+  }
 }
 
 void hibp_compute_constrained_params(size_t* n_hash_functions, size_t* log2_bits, size_t count, size_t max_memory) {
@@ -310,7 +322,8 @@ void hibp_compute_constrained_params(size_t* n_hash_functions, size_t* log2_bits
    * requisite buffer, and select the largest value log2_bits that is within the constraint.
    * At minimum, set log2_bits to 8 (even if that doesn't satisfy the constriant) */
 
-  const double log_of_2 = log(2);
+  const double ln_of_2 = log(2);
+  const double eps = 1e-6;
 
   for(size_t candidate_log2_bits = 8;; candidate_log2_bits ++) {
     /* From Wikipedia:
@@ -318,7 +331,8 @@ void hibp_compute_constrained_params(size_t* n_hash_functions, size_t* log2_bits
      * k = m / n * ln 2
      * k is the number of hash functions, m is the number of bits, n is the number of elements */
 
-    double double_candidate_n_hash_functions = ceil(pow(2, candidate_log2_bits) / count * log_of_2 + 1e-6);
+    const double bits = pow(2, candidate_log2_bits);
+    const double double_candidate_n_hash_functions = ceil(bits / count * ln_of_2 + eps);
 
     size_t candidate_n_hash_functions = (double_candidate_n_hash_functions > N_HASH_FUNCTIONS_MAX)
       ? N_HASH_FUNCTIONS_MAX
@@ -326,7 +340,7 @@ void hibp_compute_constrained_params(size_t* n_hash_functions, size_t* log2_bits
 
     size_t buffer_size;
 
-    if(compute_buffer_size(&buffer_size, candidate_log2_bits, candidate_n_hash_functions) != HIBP_OK) {
+    if(compute_buffer_size(&buffer_size, candidate_n_hash_functions, candidate_log2_bits) != HIBP_OK) {
       buffer_size = SIZE_MAX;
     }
 

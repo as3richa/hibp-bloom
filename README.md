@@ -8,7 +8,7 @@ A small, ergonomic, and extensively tested library ~~and command-line tool~~ for
 
 HIBP has been genereous in publishing an anonymized version of their password database; each password is hashed, which makes it possible to check whether a given password is present in the set, however it isn't possible to enumerate the passwords or extract personal information.
 
-500M+ hashes takes a lot of space on disk; the latest SHA1 dump is north of 9GB. Under the assumption that we only care about whether or not a given password has been compromised (ignoring interesting metadata like prevalence), it's possible to encode the set of compromised passwords as a Bloom filter. In fact, a 20MB Bloom filter can answer queries on such a dataset with no false negatives whatsoever and only a 0.1% false positive rate.
+500M+ hashes takes a lot of space on disk; the latest SHA1 dump is north of 9GB. Under the assumption that we only care about whether or not a given password has been compromised (ignoring interesting metadata like prevalence), it's possible to encode the set of compromised passwords as a Bloom filter. In fact, a 900MB Bloom filter can answer queries on such a dataset with no false negatives whatsoever and only a 0.1% false positive rate.
 
 ## API
 
