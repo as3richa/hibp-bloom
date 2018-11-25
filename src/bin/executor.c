@@ -2,24 +2,12 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <ctype.h>
 #include <errno.h>
 #include <assert.h>
 #include <openssl/sha.h>
 
 #include "executor.h"
-
-static const char* help_footer =
-  "Try `help <command>` to view detailed documentation for a command.\n\n"
-  "Commands are delimited by newlines or semicolons; individual tokens (i.e.\n"
-  "command names or parameters) are delimited by whitespace. To pass a parameter\n"
-  "containing whitespace or a semicolon, use single or double quotes. Quoted tokens\n"
-  "support a limited set of escape sequences: \"\\n\", \"\\xhh\" (for any hexadecimal\n"
-  "digits h), \"\\\"\", '\\''.\n\n"
-  "Commands accepting a filename parameter can be directed to read from standard\n"
-  "input or write to standard output by passing \"-\" (the hyphen character) as the\n"
-  "filename. Because reading from standard input exhausts the stream, standard\n"
-  "input can only be used as a parameter once per script run, and not at all if the\n"
-  "session is interactive or if the script is given on the standard input.";
 
 /* ================================================================
  * Command dispatch table
@@ -56,8 +44,10 @@ static void exec_save(executor_t* ex, size_t arity, const token_t* args);
 static void exec_unload(executor_t* ex, size_t arity, const token_t* args);
 static void exec_insert(executor_t* ex, size_t arity, const token_t* args);
 static void exec_insert_sha(executor_t* ex, size_t arity, const token_t* args);
+static void exec_insert_file(executor_t* ex, size_t arity, const token_t* args);
 static void exec_query(executor_t* ex, size_t arity, const token_t* args);
 static void exec_query_sha(executor_t* ex, size_t arity, const token_t* args);
+static void exec_query_file(executor_t* ex, size_t arity, const token_t* args);
 static void exec_falsepos(executor_t* ex, size_t arity, const token_t* args);
 static void exec_sha(executor_t* ex, size_t arity, const token_t* args);
 static void exec_help(executor_t* ex, size_t arity, const token_t* args);
@@ -162,7 +152,7 @@ static const command_t commands[] = {
     ),
     1, 2,
     true, false,
-    NULL
+    exec_insert_file
   },
 
   {
@@ -195,9 +185,9 @@ static const command_t commands[] = {
       "strings), \"lines\" (full lines including leading/trailing whitespace), or \"shas\"\n"
       "(space- or comma-separated SHA1 hashes)."
     ),
-    1, 1,
+    1, 2,
     true, false,
-    NULL
+    exec_query_file
   },
 
   {
@@ -237,6 +227,19 @@ static const command_t commands[] = {
 
 #define OUT_OF_MEMORY_MESSAGE "Out of memory"
 #define BAD_SHA_MESSAGE "expected a SHA1 hash (40 hexademical digits)"
+
+static const char* help_footer =
+  "Try `help <command>` to view detailed documentation for a command.\n\n"
+  "Commands are delimited by newlines or semicolons; individual tokens (i.e.\n"
+  "command names or parameters) are delimited by whitespace. To pass a parameter\n"
+  "containing whitespace or a semicolon, use single or double quotes. Quoted tokens\n"
+  "support a limited set of escape sequences: \"\\n\", \"\\xhh\" (for any hexadecimal\n"
+  "digits h), \"\\\"\", '\\''.\n\n"
+  "Commands accepting a filename parameter can be directed to read from standard\n"
+  "input or write to standard output by passing \"-\" (the hyphen character) as the\n"
+  "filename. Because reading from standard input exhausts the stream, standard\n"
+  "input can only be used as a parameter once per script run, and not at all if the\n"
+  "session is interactive or if the script is given on the standard input.";
 
 #define HEX(v) ((0 <= (v) && (v) <= 9) ? ('0' + (v)) : ('a' + (v) - 10))
 
@@ -301,7 +304,7 @@ static inline int ex_next_token(token_t* token, executor_t* ex) {
       assert(0);
   }
 
-  fail(ex, EX_E_RECOVERABLE, token, message);
+  fail(ex, EX_E_RECOVERABLE, NULL, message);
   return -1;
 }
 
@@ -326,8 +329,6 @@ static inline const char* hibp_strerror(hibp_status_t status) {
   }
 }
 
-/* Find a command by the name given in ex->token. Emit an error and return NULL if no matching
- * command exists */
 const command_t* find_command(executor_t* ex, const token_t* token) {
   for(size_t i = 0; i < N_COMMANDS; i ++) {
     if(token_eq(token, commands[i].name)) {
@@ -412,7 +413,7 @@ static inline FILE* ex_fopen(executor_t* ex, const token_t* token, bool in, bool
 
   /* FIXME: fopen doesn't necessarily set errno */
   if(file == NULL) {
-    fail(ex, EX_E_FATAL, token, "%s", strerror(errno));
+    fail(ex, EX_E_RECOVERABLE, token, "%s", strerror(errno));
     return NULL;
   }
 
@@ -426,6 +427,171 @@ static inline void ex_fclose(FILE* file) {
 
   /* FIXME: check for errors */
   fclose(file);
+}
+
+typedef enum {
+  SF_FORMAT_STRINGS,
+  SF_FORMAT_LINES,
+  SF_FORMAT_SHAS
+} stringfile_format_t;
+
+static inline int ex_token2format(stringfile_format_t* format, executor_t* ex, const token_t* token) {
+  if(token_eq(token, "strings")) {
+    (*format) = SF_FORMAT_STRINGS;
+    return 0;
+  }
+
+  if(token_eq(token, "lines")) {
+    (*format) = SF_FORMAT_LINES;
+    return 0;
+  }
+
+  if(token_eq(token, "shas")) {
+    (*format) = SF_FORMAT_SHAS;
+    return 0;
+  }
+
+  char* str = token2str(token);
+
+  /* Swallow any allocation errors from token2str */
+  fail(
+    ex, EX_E_RECOVERABLE, token,
+    "Invalid format %s; expected strings, lines, or shas",
+    ((str == NULL) ? "" : str)
+  );
+
+  free(str);
+
+  return -1;
+}
+
+static inline int ex_open_stringfile(stream_t* stream, executor_t* ex, const token_t* filename) {
+  FILE* file = ex_fopen(ex, filename, true, false);
+
+  if(file == NULL) {
+    return -1;
+  }
+
+  char* name = (file == stdin) ? strdup("<standard input>") : token2str(filename);
+
+  if(name == NULL) {
+    fail(ex, EX_E_FATAL, NULL, OUT_OF_MEMORY_MESSAGE);
+    return -1;
+  }
+
+  stream_new_file(stream, file, name);
+
+  return 0;
+}
+
+static inline void close_stringfile(stream_t* stream) {
+  free((void*)stream->name);
+  stream_close(stream);
+}
+
+static inline int stringfile_skip(stream_t* stream, stringfile_format_t format) {
+  switch(format) {
+    case SF_FORMAT_STRINGS:
+      for(;;) {
+        const int c = stream_peek(stream);
+
+        if(c == EOF || !isspace(c)) {
+          break;
+        }
+
+        stream_getc(stream);
+      }
+      break;
+    case SF_FORMAT_SHAS:
+      for(;;) {
+        const int c = stream_peek(stream);
+
+        if(c == EOF || (!isspace(c) && c != ',')) {
+          break;
+        }
+
+        stream_getc(stream);
+      }
+      break;
+    default:
+      assert(format == SF_FORMAT_LINES);
+      break;
+  }
+
+  return stream_peek(stream);
+}
+
+static inline int ex_stringfile_next_string(token_t* string, executor_t* ex, stream_t* stream) {
+  for(;;) {
+    const int c = stream_peek(stream);
+
+    if(c == EOF || isspace(c)) {
+      break;
+    }
+
+    if(token_pushc(string, c) == -1) {
+      fail(ex, EX_E_FATAL, NULL, OUT_OF_MEMORY_MESSAGE);
+      return -1;
+    }
+
+    stream_getc(stream);
+  }
+
+  assert(string->length > 0);
+
+  return 0;
+}
+
+static inline int ex_stringfile_next_line(token_t* line, executor_t* ex, stream_t* stream) {
+  for(;;) {
+    const int c = stream_peek(stream);
+
+    if(c == EOF || c == '\n') {
+      break;
+    }
+
+    if(token_pushc(line, c) == -1) {
+      fail(ex, EX_E_FATAL, NULL, OUT_OF_MEMORY_MESSAGE);
+      return -1;
+    }
+
+    stream_getc(stream);
+  }
+
+  assert(line->length > 0);
+
+  return 0;
+}
+
+static inline int ex_stringfile_next_sha(hibp_byte_t* sha, executor_t* ex, stream_t* stream) {
+  for(size_t i = 0; i < 2 * SHA1_BYTES; i ++) {
+    int nybble;
+
+    const int c = stream_getc(stream);
+
+    if('0' <= c && c <= '9') {
+      nybble = c - '0';
+    } else if('a' <= c && c <= 'f') {
+      nybble = 10 + c - 'a';
+    } else if('A' <= c && c <= 'F') {
+      nybble = 10 + c - 'A';
+    } else {
+      fail(
+        ex, EX_E_RECOVERABLE, NULL,
+        "malformed SHA1 hash in %s at %lu:%lu",
+        stream->name, stream->line, stream->column
+      );
+      return -1;
+    }
+
+    if(i % 2 == 0) {
+      sha[i / 2] = (nybble << 4);
+    } else {
+      sha[i / 2] |= nybble;
+    }
+  }
+
+  return 0;
 }
 
 /* ================================================================
@@ -530,7 +696,7 @@ static void exec_create_auto(executor_t* ex, size_t arity, const token_t* args) 
   const size_t memory = hibp_compute_total_size(n_hash_functions, log2_bits);
 
   /* If satisfying rate would eat too much memory, fall back on the best possible
-   * FP rate that fits within the limit */
+   * false positive rate that fits within the limit */
 
   if(memory > maxmem) {
     hibp_compute_constrained_params(&n_hash_functions, &log2_bits, count, maxmem);
@@ -639,6 +805,79 @@ static void exec_insert_sha(executor_t* ex, size_t arity, const token_t* args) {
   }
 }
 
+static void exec_insert_file(executor_t* ex, size_t arity, const token_t* args) {
+  assert(ex->filter_initialized);
+  assert(arity == 1 || arity == 2);
+
+  stringfile_format_t format;
+
+  if(arity == 2) {
+    if(ex_token2format(&format, ex, &args[1]) == -1) {
+      return;
+    }
+  } else {
+    format = SF_FORMAT_STRINGS;
+  }
+
+  stream_t stream;
+
+  if(ex_open_stringfile(&stream, ex, &args[0]) == -1) {
+    return;
+  }
+
+  size_t inserted = 0;
+
+  for(;;) {
+    if(stringfile_skip(&stream, format) == EOF) {
+      break;
+    }
+
+    if(format == SF_FORMAT_SHAS) {
+      hibp_byte_t sha[SHA1_BYTES];
+
+      if(ex_stringfile_next_sha(sha, ex, &stream) == -1) {
+        break;
+      }
+
+      hibp_bf_insert_sha1(&ex->filter, sha);
+    } else {
+      token_t token;
+      token_new(&token);
+
+      if(format == SF_FORMAT_STRINGS) {
+        if(ex_stringfile_next_string(&token, ex, &stream) == -1) {
+          token_destroy(&token);
+          break;
+        }
+      } else {
+        assert(format == SF_FORMAT_LINES);
+
+        if(ex_stringfile_next_line(&token, ex, &stream) == -1) {
+          token_destroy(&token);
+          break;
+        }
+      }
+
+      hibp_bf_insert(&ex->filter, token.length, (hibp_byte_t*)token.buffer);
+
+      token_destroy(&token);
+    }
+
+    inserted ++;
+  }
+
+  /* FIXME: every size_t => unsigned long cast is suspicious. Wish C stdlib sucked less */
+  printf(
+    "insert-file: inserted %lu %s%s from %s.\n",
+    (unsigned long)inserted,
+    ((format == SF_FORMAT_SHAS) ? "SHA" : "string"),
+    ((inserted == 1) ? "" : "s"),
+    stream.name
+  );
+
+  close_stringfile(&stream);
+}
+
 static void exec_query(executor_t* ex, size_t arity, const token_t* args) {
   assert(ex->filter_initialized);
   assert(arity > 0);
@@ -680,6 +919,86 @@ static void exec_query_sha(executor_t* ex, size_t arity, const token_t* args) {
      * printable verbatim */
     fwrite(token->buffer, 1, token->length, stdout);
     printf("  %s\n", (found ? "true" : "false"));
+  }
+}
+
+static void exec_query_file(executor_t* ex, size_t arity, const token_t* args) {
+  assert(ex->filter_initialized);
+  assert(arity == 1 || arity == 2);
+
+  stringfile_format_t format;
+
+  if(arity == 2) {
+    if(ex_token2format(&format, ex, &args[1]) == -1) {
+      return;
+    }
+  } else {
+    format = SF_FORMAT_STRINGS;
+  }
+
+  stream_t stream;
+
+  if(ex_open_stringfile(&stream, ex, &args[0]) == -1) {
+    return;
+  }
+
+  for(;;) {
+    if(stringfile_skip(&stream, format) == EOF) {
+      close_stringfile(&stream);
+      return;
+    }
+
+    if(format == SF_FORMAT_SHAS) {
+      hibp_byte_t sha[SHA1_BYTES];
+
+      if(ex_stringfile_next_sha(sha, ex, &stream) == -1) {
+        close_stringfile(&stream);
+        return;
+      }
+
+      const bool found = hibp_bf_query_sha1(&ex->filter, sha);
+
+      for(size_t i = 0; i < SHA1_BYTES; i ++) {
+        putchar(HEX(sha[i] >> 4));
+        putchar(HEX(sha[i] & 0xf));
+      }
+
+      puts(found ? "  true" : "  false");
+    } else {
+      token_t token;
+      token_new(&token);
+
+      if(format == SF_FORMAT_STRINGS) {
+        if(ex_stringfile_next_string(&token, ex, &stream) == -1) {
+          token_destroy(&token);
+          close_stringfile(&stream);
+          return;
+        }
+      } else {
+        assert(format == SF_FORMAT_LINES);
+
+        if(ex_stringfile_next_line(&token, ex, &stream) == -1) {
+          token_destroy(&token);
+          close_stringfile(&stream);
+          return;
+        }
+      }
+
+      char* str = token2str(&token);
+
+      if(str == NULL) {
+        token_destroy(&token);
+        close_stringfile(&stream);
+        return;
+      }
+
+      const bool found = hibp_bf_query(&ex->filter, token.length, (hibp_byte_t*)token.buffer);
+
+      printf("%s  %s\n", str, (found ? "true" : "false"));
+
+      free(str);
+      token_destroy(&token);
+    }
   }
 }
 
@@ -809,7 +1128,12 @@ void executor_exec_one(executor_t* ex) {
 
         if(next == NULL) {
           fail(ex, EX_E_FATAL, NULL, OUT_OF_MEMORY_MESSAGE);
+
+          while(arity --) {
+            token_destroy(&args[arity]);
+          }
           free(args);
+
           return;
         }
 
@@ -820,7 +1144,11 @@ void executor_exec_one(executor_t* ex) {
       assert(args != NULL);
 
       if(ex_next_token(&args[arity ++], ex) == -1) {
+        while(arity --) {
+          token_destroy(&args[arity]);
+        }
         free(args);
+
         return;
       }
     } while(!args[arity - 1].last_of_command);
@@ -839,7 +1167,11 @@ void executor_exec_one(executor_t* ex) {
   const command_t* command = find_command(ex, &command_name);
 
   if(command == NULL) {
+    while(arity --) {
+      token_destroy(&args[arity]);
+    }
     free(args);
+
     return;
   }
 
@@ -875,7 +1207,11 @@ void executor_exec_one(executor_t* ex) {
       ((command->min_arity == 1) ? "" : "s")
     );
 
+    while(arity --) {
+      token_destroy(&args[arity]);
+    }
     free(args);
+
     return;
   }
 
@@ -885,7 +1221,12 @@ void executor_exec_one(executor_t* ex) {
       "%s requires a loaded Bloom filter; try `help` to learn how to create or load a filter",
       command->name
     );
+
+    while(arity --) {
+      token_destroy(&args[arity]);
+    }
     free(args);
+
     return;
   }
 
@@ -895,12 +1236,20 @@ void executor_exec_one(executor_t* ex) {
       "%s would overwrite the already-loaded filter; run `save` and `unload` first",
       command->name
     );
+
+    while(arity --) {
+      token_destroy(&args[arity]);
+    }
     free(args);
+
     return;
   }
 
   command->exec(ex, arity, args);
 
+  while(arity --) {
+    token_destroy(&args[arity]);
+  }
   free(args);
 }
 

@@ -29,7 +29,7 @@ void token_destroy(token_t* token);
 int token_pushc(token_t* token, int c);
 
 /* Equality comparison with a null-terminated string */
-int token_eq(const token_t* token, const char* str);
+bool token_eq(const token_t* token, const char* str);
 
 /* Conversion functions: These return -1 on parse failure or overflow. Unlike the
  * standard library functions they don't tolerate trailing characters not part of

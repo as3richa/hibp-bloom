@@ -48,11 +48,11 @@ int token_pushc(token_t* token, int c) {
   return 0;
 }
 
-int token_eq(const token_t* token, const char* str) {
+bool token_eq(const token_t* token, const char* str) {
   const size_t length = strlen(str);
 
   if(token->length != length) {
-    return 0;
+    return false;
   }
 
   return (memcmp(token->buffer, str, length) == 0);
